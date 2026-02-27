@@ -1,6 +1,8 @@
 package filter
 
-import "reflect"
+import (
+	"reflect"
+)
 
 func (f Filter) Struct(obj any) (Fields, error) {
 	if obj == nil {
@@ -37,9 +39,9 @@ func (f Filter) Struct(obj any) (Fields, error) {
 		// TODO: this doesn't really support mutliple levels of inderection yet,
 		// which I think we want to let people do. Could I have just written it
 		// in the time it took to write this comment? We'll never know.
-		fieldType := field.Type
-		if fieldIsPointer(field) {
-			fieldType = fieldType.Elem()
+		fieldType, err := f.removeIndirects(field.Type)
+		if err != nil {
+			return nil, err
 		}
 
 		// if the field is a struct, we'll add it to the queue to be processed later
@@ -55,38 +57,55 @@ func (f Filter) Struct(obj any) (Fields, error) {
 	// now we'll process the queue of struct fields in a cool psycho-loop style
 	// no recursion for reasons of trauma
 	for i := 0; i < len(next); i++ {
-		field := nextMap[next[i]]
+		index := next[i]
+		field := nextMap[index]
 
 		// we're just doing the same logic as above - it's kind of like cheating!
 		// not DRY, you say? Read closer, I say!
-		fieldType := field.Type
-		if fieldIsPointer(field) {
-			fieldType = fieldType.Elem()
+		fieldType, err := f.removeIndirects(field.Type)
+		if err != nil {
+			return nil, err
 		}
-
-		// TODO: support multiple indirects
 
 		for subField := range fieldType.Fields() {
 			if !subField.IsExported() && f.config.SkipHiddenFields {
 				continue
 			}
 
-			subFieldType := subField.Type
-			if fieldIsPointer(subField) {
-				subFieldType = subFieldType.Elem()
+			subFieldType, err := f.removeIndirects(subField.Type)
+			if err != nil {
+				return nil, err
 			}
 
 			if typeIsStruct(subFieldType) {
-				next = append(next, field.Name+"."+subField.Name)
-				nextMap[field.Name+"."+subField.Name] = subField
+				prefix := index + "." + subField.Name
+				next = append(next, prefix)
+				nextMap[prefix] = subField
 				continue
 			}
 
-			fields[field.Name+"."+subField.Name] = mapFieldType(subFieldType)
+			fields[index+"."+subField.Name] = mapFieldType(subFieldType)
 		}
 	}
 
 	return fields, nil
+}
+
+func (f Filter) removeIndirects(t reflect.Type) (reflect.Type, error) {
+	max := f.config.MaxIndirects
+	for range max {
+		if typeIsPointer(t) {
+			t = t.Elem()
+		} else {
+			break
+		}
+	}
+
+	if typeIsPointer(t) {
+		return nil, ErrMaxIndirects
+	}
+
+	return t, nil
 }
 
 func typeIsPointer(t reflect.Type) bool {

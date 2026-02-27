@@ -24,7 +24,18 @@ type Filter struct {
 // very tempted to call this "Activate", but
 // I'll have to find something else for that
 func New(config *Config) Filter {
-	return Filter{}
+	var cfg Config
+	if config == nil {
+		cfg = defaultConfig()
+	} else {
+		cfg = *config
+		if err := cfg.validate(); err != nil {
+			panic(err)
+		}
+	}
+	return Filter{
+		config: cfg,
+	}
 }
 
 func autoDetect(obj any) (dataKind, error) {
