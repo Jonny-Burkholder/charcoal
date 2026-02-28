@@ -120,7 +120,7 @@ func fieldIsPointer(field reflect.StructField) bool {
 	return field.Type.Kind() == reflect.Pointer || field.Type.Kind() == reflect.Ptr
 }
 
-func mapFieldType(t reflect.Type) fieldType {
+func mapFieldType(t reflect.Type) FieldType {
 	switch t.Kind() {
 	case reflect.Bool:
 		return TypeBool

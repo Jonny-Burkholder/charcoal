@@ -1,10 +1,10 @@
 package filter
 
-type fieldType uint8
+type FieldType uint8
 
 // we'll follow JSON-like type conventions for now
 const (
-	TypeNumber fieldType = iota
+	TypeNumber FieldType = iota
 	TypeString
 	TypeBool
 	TypeBytes
@@ -12,4 +12,4 @@ const (
 )
 
 // Fields maps a filter's name to its data type
-type Fields map[string]fieldType
+type Fields map[string]FieldType
