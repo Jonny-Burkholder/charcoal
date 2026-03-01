@@ -305,11 +305,161 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 	return clause, nil
 }
 
-// parseGroupToken takes a group query substring and parses it into a Token tree
+// stripOuterParens removes the outermost parentheses from a token string if they
+// wrap the entire expression. It does not strip parens in cases like "(a) OR (b)"
+// where the first open paren closes before the end.
+func stripOuterParens(tok string) string {
+	tok = strings.TrimSpace(tok)
+	if len(tok) < 2 || tok[0] != '(' {
+		return tok
+	}
+
+	// find the matching close paren for the opening paren at index 0
+	depth := 0
+	var inSingleQuote, inDoubleQuote bool
+	for i := 0; i < len(tok); i++ {
+		ch := tok[i]
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+		} else if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		} else if !inSingleQuote && !inDoubleQuote {
+			if ch == '(' {
+				depth++
+			} else if ch == ')' {
+				depth--
+				if depth == 0 {
+					if i == len(tok)-1 {
+						// the matching close paren is the last char — safe to strip
+						return strings.TrimSpace(tok[1 : len(tok)-1])
+					}
+					// the matching close paren is not at the end, don't strip
+					return tok
+				}
+			}
+		}
+	}
+	return tok
+}
+
+// splitTopLevel splits tok on the given separator, but only when the separator
+// appears outside of single quotes, double quotes, and parentheses. The separator
+// is matched case-insensitively. All resulting segments are trimmed of whitespace.
+func splitTopLevel(tok string, sep string) []string {
+	sep = strings.ToLower(sep)
+	sepLen := len(sep)
+	tokLower := strings.ToLower(tok)
+
+	var result []string
+	var inSingleQuote, inDoubleQuote bool
+	var parenDepth int
+	lastSplit := 0
+
+	i := 0
+	for i < len(tok) {
+		ch := tok[i]
+
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+		} else if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		} else if !inSingleQuote && !inDoubleQuote {
+			if ch == '(' {
+				parenDepth++
+			} else if ch == ')' {
+				parenDepth--
+			}
+
+			if parenDepth == 0 && i+sepLen <= len(tok) && tokLower[i:i+sepLen] == sep {
+				result = append(result, strings.TrimSpace(tok[lastSplit:i]))
+				lastSplit = i + sepLen
+				i += sepLen
+				continue
+			}
+		}
+
+		i++
+	}
+
+	result = append(result, strings.TrimSpace(tok[lastSplit:]))
+	return result
+}
+
+// parseGroupToken takes a group query substring and parses it into a Token tree.
+// It recursively splits the token into its component expressions and parses each one.
 // It returns an error if the token is malformed.
-func parseGroupToken(tok string) ([]tokens.FilterToken, error) {
-	// TODO: logic
-	return []tokens.FilterToken{}, nil
+func parseGroupToken(tok string, fields filter.Fields) (tokens.FilterToken, error) {
+	tok = strings.TrimSpace(tok)
+	tok = stripOuterParens(tok)
+
+	result := tokens.FilterToken{}
+
+	// first, try to split on top-level OR
+	orSegments := splitTopLevel(tok, " or ")
+
+	if len(orSegments) > 1 {
+		result.JoinOp = tokens.OpOr
+		for _, seg := range orSegments {
+			seg = strings.TrimSpace(seg)
+			if seg != "" && seg[0] == '(' {
+				child, err := parseGroupToken(seg, fields)
+				if err != nil {
+					return tokens.FilterToken{}, err
+				}
+				result.Children = append(result.Children, tokens.NextFilterToken{
+					Op: tokens.OpOr,
+					T:  child,
+				})
+			} else {
+				clause, err := parseFilterClause(seg, fields)
+				if err != nil {
+					return tokens.FilterToken{}, err
+				}
+				result.Clauses = append(result.Clauses, clause)
+			}
+		}
+		return result, nil
+	}
+
+	// no top-level OR — split on commas and AND (both are AND separators)
+	commaParts := splitTopLevel(tok, ",")
+	var andParts []string
+	for _, part := range commaParts {
+		subParts := splitTopLevel(strings.TrimSpace(part), " and ")
+		andParts = append(andParts, subParts...)
+	}
+
+	if len(andParts) > 1 {
+		result.JoinOp = tokens.OpAnd
+		for _, seg := range andParts {
+			seg = strings.TrimSpace(seg)
+			if seg != "" && seg[0] == '(' {
+				child, err := parseGroupToken(seg, fields)
+				if err != nil {
+					return tokens.FilterToken{}, err
+				}
+				result.Children = append(result.Children, tokens.NextFilterToken{
+					Op: tokens.OpAnd,
+					T:  child,
+				})
+			} else {
+				clause, err := parseFilterClause(seg, fields)
+				if err != nil {
+					return tokens.FilterToken{}, err
+				}
+				result.Clauses = append(result.Clauses, clause)
+			}
+		}
+		return result, nil
+	}
+
+	// single clause — no splitting needed
+	clause, err := parseFilterClause(tok, fields)
+	if err != nil {
+		return tokens.FilterToken{}, err
+	}
+	result.Clauses = append(result.Clauses, clause)
+	return result, nil
 }
 
 // normalizeCandidate normalizes a candidate field or operator string by trimming whitespace and converting to lowercase.

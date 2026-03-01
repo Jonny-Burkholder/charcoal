@@ -426,6 +426,257 @@ func TestParseFilterClause(t *testing.T) {
 	}
 }
 
+type testSplitGroupTokenTestCase struct {
+	name     string
+	input    string
+	expected tokens.FilterToken
+}
+
+var testSplitGroupTokenTestCases = []testSplitGroupTokenTestCase{
+	{
+		name:  "simple group token",
+		input: "(name='John', name='Jane')",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "Jane",
+				},
+			},
+			JoinOp: tokens.OpAnd,
+		},
+	},
+	{
+		name:  "simple OR group token",
+		input: "(name='John' OR name='Jane')",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "Jane",
+				},
+			},
+			JoinOp: tokens.OpOr,
+		},
+	},
+	{
+		name:  "simple OR token - no parentheses",
+		input: "name='John' OR name='Jane'",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "Jane",
+				},
+			},
+			JoinOp: tokens.OpOr,
+		},
+	},
+	{
+		name:  "nested group token",
+		input: "(name='John' OR (name='Jane' AND city='NY'))",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+			},
+			JoinOp: tokens.OpOr,
+			Children: []tokens.NextFilterToken{
+				{
+					Op: tokens.OpOr,
+					T: tokens.FilterToken{
+						Clauses: []tokens.Clause{
+							{
+								Field:    "name",
+								Operator: filter.OpEq,
+								Value:    "Jane",
+							},
+							{
+								Field:    "city",
+								Operator: filter.OpEq,
+								Value:    "NY",
+							},
+						},
+						JoinOp: tokens.OpAnd,
+					},
+				},
+			},
+		},
+	},
+	{
+		name:  "complex nested group token",
+		input: "(name='John' OR (name='Jane' AND (city='NY' OR city='LA')))",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+			},
+			JoinOp: tokens.OpOr,
+			Children: []tokens.NextFilterToken{
+				{
+					Op: tokens.OpOr,
+					T: tokens.FilterToken{
+						Clauses: []tokens.Clause{
+							{
+								Field:    "name",
+								Operator: filter.OpEq,
+								Value:    "Jane",
+							},
+						},
+						JoinOp: tokens.OpAnd,
+						Children: []tokens.NextFilterToken{
+							{
+								Op: tokens.OpAnd,
+								T: tokens.FilterToken{
+									Clauses: []tokens.Clause{
+										{
+											Field:    "city",
+											Operator: filter.OpEq,
+											Value:    "NY",
+										},
+										{
+											Field:    "city",
+											Operator: filter.OpEq,
+											Value:    "LA",
+										},
+									},
+									JoinOp: tokens.OpOr,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name:  "very complex nested group token",
+		input: "(name='John' OR (name='Jane' AND (city='NY' OR (city='LA' AND isActive=true))) OR (name='Doe' AND city='Chicago'))",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+			},
+			JoinOp: tokens.OpOr,
+			Children: []tokens.NextFilterToken{
+				{
+					Op: tokens.OpOr,
+					T: tokens.FilterToken{
+						Clauses: []tokens.Clause{
+							{
+								Field:    "name",
+								Operator: filter.OpEq,
+								Value:    "Jane",
+							},
+						},
+						JoinOp: tokens.OpAnd,
+						Children: []tokens.NextFilterToken{
+							{
+								Op: tokens.OpAnd,
+								T: tokens.FilterToken{
+									Clauses: []tokens.Clause{
+										{
+											Field:    "city",
+											Operator: filter.OpEq,
+											Value:    "NY",
+										},
+									},
+									JoinOp: tokens.OpOr,
+									Children: []tokens.NextFilterToken{
+										{
+											Op: tokens.OpOr,
+											T: tokens.FilterToken{
+												Clauses: []tokens.Clause{
+													{
+														Field:    "city",
+														Operator: filter.OpEq,
+														Value:    "LA",
+													},
+													{
+														Field:    "isactive",
+														Operator: filter.OpEq,
+														Value:    "true",
+													},
+												},
+												JoinOp: tokens.OpAnd,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					Op: tokens.OpOr,
+					T: tokens.FilterToken{
+						Clauses: []tokens.Clause{
+							{
+								Field:    "name",
+								Operator: filter.OpEq,
+								Value:    "Doe",
+							},
+							{
+								Field:    "city",
+								Operator: filter.OpEq,
+								Value:    "Chicago",
+							},
+						},
+						JoinOp: tokens.OpAnd,
+					},
+				},
+			},
+		},
+	},
+}
+
+var groupTokenTestFields = filter.Fields{
+	"name":     filter.TypeString,
+	"city":     filter.TypeString,
+	"isactive": filter.TypeBool,
+}
+
+func TestParseGroupToken(t *testing.T) {
+	for _, tc := range testSplitGroupTokenTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseGroupToken(tc.input, groupTokenTestFields)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tokensAreEqual(result, tc.expected) {
+				t.Errorf("expected\n%+v\ngot\n%+v", tc.expected, result)
+			}
+		})
+	}
+}
+
 func clausesAreEqual(a, b tokens.Clause) bool {
 	return a.Field == b.Field && a.Operator == b.Operator && a.Value == b.Value
 }
