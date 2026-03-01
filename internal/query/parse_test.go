@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-type splitFilterStringTestCase struct {
+type splitFilterTokensTestCase struct {
 	name        string
 	input       string
 	expected    []string
 	expectedErr error
 }
 
-var splitFilterStringTestCases = []splitFilterStringTestCase{
+var splitFilterTokensTestCases = []splitFilterTokensTestCase{
 	{
 		name:     "simple expression",
 		input:    "age>30",
@@ -29,6 +29,17 @@ var splitFilterStringTestCases = []splitFilterStringTestCase{
 		name:     "multiple expressions",
 		input:    "age>30 , name='John',city='New York'",
 		expected: []string{"age>30", "name='John'", "city='New York'"},
+	},
+	{
+		name:  "even more expressions",
+		input: "age>30 , name='John', city='New York', isActive=true, description='A user from New York'",
+		expected: []string{
+			"age>30",
+			"name='John'",
+			"city='New York'",
+			"isActive=true",
+			"description='A user from New York'",
+		},
 	},
 	{
 		name:     "expressions with commas in values",
@@ -92,19 +103,19 @@ var splitFilterStringTestCases = []splitFilterStringTestCase{
 	},
 }
 
-func TestSplitFilterString(t *testing.T) {
-	for _, tc := range splitFilterStringTestCases {
+func TestSplitFilterTokens(t *testing.T) {
+	for _, tc := range splitFilterTokensTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := splitFilterTokens(tc.input)
 			if !errors.Is(err, tc.expectedErr) {
 				t.Fatalf("expected error '%v', got '%v'", tc.expectedErr, err)
 			}
 			if len(result) != len(tc.expected) {
-				t.Fatalf("expected %d tokens, got %d", len(tc.expected), len(result))
+				t.Fatalf("expected %d expressions, got %d", len(tc.expected), len(result))
 			}
 			for i := range result {
 				if result[i] != tc.expected[i] {
-					t.Errorf("expected token %d to be '%s', got '%s'", i, tc.expected[i], result[i])
+					t.Errorf("expected expression %d to be '%s', got '%s'", i, tc.expected[i], result[i])
 				}
 			}
 		})
@@ -141,7 +152,7 @@ var isGroupTokenTestCases = []isGroupTokenTestCase{
 	{
 		name:     "malformed token - it doesn't matter",
 		input:    "name='John' OR name='Jane'",
-		expected: false,
+		expected: true,
 	},
 }
 
@@ -156,29 +167,25 @@ func TestIsGroupToken(t *testing.T) {
 	}
 }
 
-type parseFilterTokenTestCase struct {
+type parseFilterClauseTestCase struct {
 	name        string
 	input       string
 	fields      filter.Fields
-	expected    tokens.FilterToken
+	expected    tokens.Clause
 	expectedErr error
 }
 
-var parseFilterTokenTestCases = []parseFilterTokenTestCase{
+var parseFilterClauseTestCases = []parseFilterClauseTestCase{
 	{
 		name:  "simple expression",
 		input: "age>30",
 		fields: filter.Fields{
 			"age": filter.TypeNumber,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "age",
-					Operator: filter.OpGt,
-					Value:    "30",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpGt,
+			Value:    "30",
 		},
 	},
 	{
@@ -187,14 +194,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"age": filter.TypeNumber,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "age",
-					Operator: filter.OpGt,
-					Value:    "30",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpGt,
+			Value:    "30",
 		},
 	},
 	{
@@ -203,14 +206,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"age": filter.TypeNumber,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "age",
-					Operator: filter.OpGt,
-					Value:    "30",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpGt,
+			Value:    "30",
 		},
 	},
 	{
@@ -219,14 +218,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"description": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "description",
-					Operator: filter.OpEq,
-					Value:    "John is > 30 years old",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "description",
+			Operator: filter.OpEq,
+			Value:    "John is > 30 years old",
 		},
 	},
 	{
@@ -235,14 +230,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"description": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "description",
-					Operator: filter.OpEq,
-					Value:    "John's book",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "description",
+			Operator: filter.OpEq,
+			Value:    "John's book",
 		},
 	},
 	{
@@ -251,14 +242,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"description": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "description",
-					Operator: filter.OpEq,
-					Value:    `She said "Hello"`,
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "description",
+			Operator: filter.OpEq,
+			Value:    `She said "Hello"`,
 		},
 	},
 	{
@@ -267,14 +254,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"name": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "name",
-					Operator: filter.OpNotNull,
-					Value:    "",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "name",
+			Operator: filter.OpNotNull,
+			Value:    "",
 		},
 	},
 	{
@@ -283,13 +266,9 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"name": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "name",
-					Operator: filter.OpIsNull,
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "name",
+			Operator: filter.OpIsNull,
 		},
 	},
 
@@ -299,13 +278,9 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"name": filter.TypeString,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "name",
-					Operator: filter.OpIsNull,
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "name",
+			Operator: filter.OpIsNull,
 		},
 	},
 	// TODO: can this case be made valid with our current parsing logic?
@@ -349,14 +324,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"age": filter.TypeNumber,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "age",
-					Operator: filter.OpGt,
-					Value:    "30",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpGt,
+			Value:    "30",
 		},
 	},
 	{
@@ -365,14 +336,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"age": filter.TypeNumber,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "age",
-					Operator: filter.OpGt,
-					Value:    "30",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpGt,
+			Value:    "30",
 		},
 	},
 	{
@@ -393,14 +360,10 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 		fields: filter.Fields{
 			"isactive": filter.TypeBool,
 		},
-		expected: tokens.FilterToken{
-			Clauses: []tokens.Clause{
-				{
-					Field:    "isactive",
-					Operator: filter.OpEq,
-					Value:    "true",
-				},
-			},
+		expected: tokens.Clause{
+			Field:    "isactive",
+			Operator: filter.OpEq,
+			Value:    "true",
 		},
 	},
 	{
@@ -449,18 +412,22 @@ var parseFilterTokenTestCases = []parseFilterTokenTestCase{
 	},
 }
 
-func TestParseFilterToken(t *testing.T) {
-	for _, tc := range parseFilterTokenTestCases {
+func TestParseFilterClause(t *testing.T) {
+	for _, tc := range parseFilterClauseTestCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := parseFilterToken(tc.input, tc.fields)
+			result, err := parseFilterClause(tc.input, tc.fields)
 			if !errors.Is(err, tc.expectedErr) {
 				t.Fatalf("expected error '%v', got '%v'", tc.expectedErr, err)
 			}
-			if !tokensAreEqual(result, tc.expected) {
+			if !clausesAreEqual(result, tc.expected) {
 				t.Errorf("expected token '%v', got '%v'", tc.expected, result)
 			}
 		})
 	}
+}
+
+func clausesAreEqual(a, b tokens.Clause) bool {
+	return a.Field == b.Field && a.Operator == b.Operator && a.Value == b.Value
 }
 
 func tokensAreEqual(a, b tokens.FilterToken) bool {

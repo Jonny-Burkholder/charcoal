@@ -4,6 +4,7 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -91,12 +92,30 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 		return nil, splitErr
 	}
 
+	if len(indexes) < 1 {
+		// there's only one clause, return it
+		return []string{strings.TrimSpace(queryStr)}, nil
+	}
+
+	// if there's only one comma, return both parts
+	if len(indexes) == 1 {
+		return []string{
+			strings.TrimSpace(queryStr[:indexes[0]]),
+			strings.TrimSpace(queryStr[indexes[0]+1:]),
+		}, nil
+	}
+
+	// get the first part before the first comma
+	res = append(res, strings.TrimSpace(queryStr[:indexes[0]]))
+
 	// split the string at the identified indexes
 	for i := 0; i < len(indexes)-1; i++ {
 		res = append(res, strings.TrimSpace(queryStr[indexes[i]+1:indexes[i+1]]))
 	}
 	// add the final segment after the last comma
 	res = append(res, strings.TrimSpace(queryStr[indexes[len(indexes)-1]+1:]))
+
+	fmt.Println(res)
 
 	return res, nil
 }
@@ -149,9 +168,9 @@ func isGroupToken(tok string) bool {
 }
 
 // TODO: this function can be more DRY
-// parseFilterToken takes a filter query substring and parses the field, operator, and value into
-// a FilterToken. It returns an error if the token is malformed.
-func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, error) {
+// parseFilterClause takes a filter query substring and parses the field, operator, and value into
+// a tokens.Clause. It returns an error if the clause is malformed.
+func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) {
 	clause := tokens.Clause{}
 
 	// normalize the token string
@@ -200,17 +219,15 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 		// but if there is a value, the token is malformed
 		if *op == filter.OpIsNull || *op == filter.OpNotNull {
 			if (!splitOp && len(parts) > 2) || (splitOp && len(parts) > 3) {
-				return tokens.FilterToken{}, InvalidExpressionError(tok)
+				return tokens.Clause{}, InvalidExpressionError(tok)
 			}
-			return tokens.FilterToken{
-				Clauses: []tokens.Clause{clause},
-			}, nil
+			return clause, nil
 		}
 
 		// otherwise, we need to fetch a value
 		// if there's too many or too few parts, the token is malformed
 		if (!splitOp && len(parts) != 3) || (splitOp && len(parts) != 4) {
-			return tokens.FilterToken{}, InvalidExpressionError(tok)
+			return tokens.Clause{}, InvalidExpressionError(tok)
 		}
 
 		// the value is either the third part or the fourth part, depending on whether the operator was split
@@ -219,7 +236,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 		// normalize the filter value and validate that the value is compatible with the field type
 		value = normalizeFieldValue(value)
 		if !fieldTypeIsValid(value, fieldType) {
-			return tokens.FilterToken{}, TypeMismatchError{
+			return tokens.Clause{}, TypeMismatchError{
 				Field:    field,
 				Value:    value,
 				Expected: fieldType,
@@ -227,9 +244,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 		}
 		clause.Value = value
 
-		return tokens.FilterToken{
-			Clauses: []tokens.Clause{clause},
-		}, nil
+		return clause, nil
 	}
 
 	// if that didn't work - indexing!
@@ -253,7 +268,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	}
 
 	if opString == "" {
-		return tokens.FilterToken{}, InvalidExpressionError(tok)
+		return tokens.Clause{}, InvalidExpressionError(tok)
 	}
 
 	// we've got the operator and its index, let's split the string into field and value parts
@@ -264,19 +279,19 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	if typ, ok := fields[field]; ok {
 		fieldType = typ
 	} else {
-		return tokens.FilterToken{}, FieldNotFoundError(field)
+		return tokens.Clause{}, FieldNotFoundError(field)
 	}
 
 	// validate the operator
 	if opInt, ok := filter.OperatorMap[opString]; ok {
 		op = &opInt
 	} else {
-		return tokens.FilterToken{}, InvalidOperatorError(opString)
+		return tokens.Clause{}, InvalidOperatorError(opString)
 	}
 
 	// validate that the value is compatible with the field type
 	if !fieldTypeIsValid(value, fieldType) {
-		return tokens.FilterToken{}, TypeMismatchError{
+		return tokens.Clause{}, TypeMismatchError{
 			Field:    field,
 			Value:    value,
 			Expected: fieldType,
@@ -287,9 +302,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	clause.Operator = *op
 	clause.Value = value
 
-	return tokens.FilterToken{
-		Clauses: []tokens.Clause{clause},
-	}, nil
+	return clause, nil
 }
 
 // parseGroupToken takes a group query substring and parses it into a Token tree
