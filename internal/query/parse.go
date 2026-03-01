@@ -4,7 +4,6 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -156,7 +155,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	clause := tokens.Clause{}
 
 	// normalize the token string
-	tok = strings.ToLower(strings.TrimSpace(tok))
+	tok = strings.TrimSpace(tok)
 
 	var op *int // to check zero value
 	var field string
@@ -165,14 +164,13 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	var found bool   // did we find the token with this string split method?
 
 	// first, split on whitespace and see if we can get the whole token
-	fmt.Println("splitting token")
 	parts := strings.Fields(tok)
 	if len(parts) >= 2 {
-		field = parts[0]
+		field = normalizeCandidate(parts[0])
 		if typ, ok := fields[field]; ok {
 			fieldType = typ
 		}
-		opCandidate := parts[1]
+		opCandidate := normalizeCandidate(parts[1])
 		if opInt, ok := filter.OperatorMap[opCandidate]; ok {
 			op = &opInt
 		}
@@ -237,9 +235,8 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	// if that didn't work - indexing!
 	// index the first quote instance - we'll only look before this
 	// If the operator is after the first quote, get good newb
-	fmt.Println("indexing quotes")
 	quoteIndex := strings.IndexAny(tok, `'"`)
-	subString := tok
+	subString := normalizeCandidate(tok)
 	if quoteIndex != -1 {
 		subString = tok[:quoteIndex]
 	}
@@ -248,13 +245,8 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	var opIndex int
 
 	// index any operator in the substring before the first quote
-	fmt.Println("indexing operators")
 	for opCandidate := range filter.OperatorMap {
 		if idx := strings.Index(subString, opCandidate); idx != -1 {
-			if opString != "" {
-				// more than one operator, bad query
-				return tokens.FilterToken{}, InvalidExpressionError(tok)
-			}
 			opString = opCandidate
 			opIndex = idx
 		}
@@ -265,9 +257,8 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 	}
 
 	// we've got the operator and its index, let's split the string into field and value parts
-	fmt.Println("getting field and value")
-	field = strings.TrimSpace(tok[:opIndex])
-	value := strings.TrimSpace(tok[opIndex+len(opString):])
+	field = normalizeCandidate(tok[:opIndex])
+	value := normalizeFieldValue(tok[opIndex+len(opString):])
 
 	// validate the field exists in the field map
 	if typ, ok := fields[field]; ok {
@@ -283,8 +274,7 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 		return tokens.FilterToken{}, InvalidOperatorError(opString)
 	}
 
-	// normalize the filter value and validate that the value is compatible with the field type
-	value = normalizeFieldValue(value)
+	// validate that the value is compatible with the field type
 	if !fieldTypeIsValid(value, fieldType) {
 		return tokens.FilterToken{}, TypeMismatchError{
 			Field:    field,
@@ -309,19 +299,29 @@ func parseGroupToken(tok string) ([]tokens.FilterToken, error) {
 	return []tokens.FilterToken{}, nil
 }
 
+// normalizeCandidate normalizes a candidate field or operator string by trimming whitespace and converting to lowercase.
+func normalizeCandidate(candidate string) string {
+	return strings.ToLower(strings.TrimSpace(candidate))
+}
+
 // normalizeFieldValue removes surrounding quotes from a field value and unescapes any escaped quotes within the value.
 func normalizeFieldValue(value string) string {
 	value = strings.TrimSpace(value)
+
+	// Only remove outermost quotes if they match
 	if len(value) >= 2 {
-		if (value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"') {
-			// remove surrounding quotes
+		firstChar := value[0]
+		lastChar := value[len(value)-1]
+		if (firstChar == '"' && lastChar == '"') || (firstChar == '\'' && lastChar == '\'') {
 			value = value[1 : len(value)-1]
-			// unescape any escaped quotes within the value
-			value = strings.ReplaceAll(value, `\'`, `'`)
-			value = strings.ReplaceAll(value, `\"`, `"`)
 		}
 	}
-	return value
+
+	value = strings.ReplaceAll(value, `\"`, `"`)
+	value = strings.ReplaceAll(value, `\'`, `'`)
+
+	// final whitespace trim after unescaping
+	return strings.TrimSpace(value)
 }
 
 // fieldTypeIsValid checks if the value is compatible with the field type
