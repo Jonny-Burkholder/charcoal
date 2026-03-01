@@ -1,6 +1,8 @@
 package query
 
 import (
+	"charcoal/internal/filter"
+	"charcoal/internal/tokens"
 	"errors"
 	"testing"
 )
@@ -152,4 +154,321 @@ func TestIsGroupToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+type parseFilterTokenTestCase struct {
+	name        string
+	input       string
+	fields      filter.Fields
+	expected    tokens.FilterToken
+	expectedErr error
+}
+
+var parseFilterTokenTestCases = []parseFilterTokenTestCase{
+	{
+		name:  "simple expression",
+		input: "age>30",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "age",
+					Operator: filter.OpGt,
+					Value:    "30",
+				},
+			},
+		},
+	},
+	{
+		name:  "simple expression with spaces",
+		input: "age > 30",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "age",
+					Operator: filter.OpGt,
+					Value:    "30",
+				},
+			},
+		},
+	},
+	{
+		name:  "simple expression with string operator",
+		input: "age gt 30",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "age",
+					Operator: filter.OpGt,
+					Value:    "30",
+				},
+			},
+		},
+	},
+	{
+		name:  "string expression with quotes",
+		input: "description='John is > 30 years old'",
+		fields: filter.Fields{
+			"description": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "description",
+					Operator: filter.OpEq,
+					Value:    "John is > 30 years old",
+				},
+			},
+		},
+	},
+	{
+		name:  "string expression with double quotes and single quote inside",
+		input: `description="John's book"`,
+		fields: filter.Fields{
+			"description": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "description",
+					Operator: filter.OpEq,
+					Value:    "John's book",
+				},
+			},
+		},
+	},
+	{
+		name:  "string expression with single quotes and double quote inside",
+		input: `description='She said "Hello"'`,
+		fields: filter.Fields{
+			"description": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "description",
+					Operator: filter.OpEq,
+					Value:    `She said "Hello"`,
+				},
+			},
+		},
+	},
+	{
+		name:  "not null operator",
+		input: "name not null	",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpNotNull,
+					Value:    "",
+				},
+			},
+		},
+	},
+	{
+		name:  "null operator",
+		input: "name null",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpIsNull,
+				},
+			},
+		},
+	},
+
+	{
+		name:  "is null operator",
+		input: "name is null",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpIsNull,
+				},
+			},
+		},
+	},
+	{
+		name:        "invalid operator",
+		input:       "age >> 30",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: InvalidOperatorError(">>"),
+	},
+	{
+		name:  "invalid operator causes invalid value error",
+		input: "age>>30",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: TypeMismatchError{
+			Field:    "age",
+			Value:    ">30",
+			Expected: filter.TypeNumber,
+		},
+	},
+	{
+		name:        "field not found",
+		input:       "height>180",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: FieldNotFoundError("height"),
+	},
+	{
+		name:   "type mismatch - non-numeric value for number field",
+		input:  "age>old",
+		fields: filter.Fields{"age": filter.TypeNumber},
+		expectedErr: TypeMismatchError{
+			Field:    "age",
+			Value:    "old",
+			Expected: filter.TypeNumber,
+		},
+	},
+	{
+		name:  "string number works for number field",
+		input: "age>'30'",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "age",
+					Operator: filter.OpGt,
+					Value:    "30",
+				},
+			},
+		},
+	},
+	{
+		name:  "string with spaces works for number field",
+		input: "age>' 30 '",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "age",
+					Operator: filter.OpGt,
+					Value:    "30",
+				},
+			},
+		},
+	},
+	{
+		name:  "type mismatch - non-boolean value for boolean field",
+		input: "isActive>yes",
+		fields: filter.Fields{
+			"isActive": filter.TypeBool,
+		},
+		expectedErr: TypeMismatchError{
+			Field:    "isActive",
+			Value:    "yes",
+			Expected: filter.TypeBool,
+		},
+	},
+	{
+		name:  "boolean true value",
+		input: "isActive=true",
+		fields: filter.Fields{
+			"isActive": filter.TypeBool,
+		},
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "isActive",
+					Operator: filter.OpEq,
+					Value:    "true",
+				},
+			},
+		},
+	},
+	{
+		name:  "not enough parts in expression",
+		input: "age30",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: InvalidExpressionError("age30"),
+	},
+	{
+		name:  "too many parts in expression for non-split operator",
+		input: "age > 30 extra",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: InvalidExpressionError("age > 30 extra"),
+	},
+	{
+		name:  "too many parts in expression for split operator",
+		input: "name not null extra",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expectedErr: InvalidExpressionError("name not null extra"),
+	},
+	{
+		name:  "too many operators in expression",
+		input: "age>30>20",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: InvalidExpressionError("age > 30 > 20"),
+	},
+}
+
+func TestParseFilterToken(t *testing.T) {
+	for _, tc := range parseFilterTokenTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseFilterToken(tc.input, tc.fields)
+			if !errors.Is(err, tc.expectedErr) {
+				t.Fatalf("expected error '%v', got '%v'", tc.expectedErr, err)
+			}
+			if !tokensAreEqual(result, tc.expected) {
+				t.Errorf("expected token '%v', got '%v'", tc.expected, result)
+			}
+		})
+	}
+}
+
+func tokensAreEqual(a, b tokens.FilterToken) bool {
+	if len(a.Clauses) != len(b.Clauses) {
+		return false
+	}
+	for i := range a.Clauses {
+		if a.Clauses[i] != b.Clauses[i] {
+			return false
+		}
+	}
+	if a.JoinOp != b.JoinOp {
+		return false
+	}
+	if len(a.Children) != len(b.Children) {
+		return false
+	}
+	for i := range a.Children {
+		if a.Children[i].Op != b.Children[i].Op || !tokensAreEqual(a.Children[i].T, b.Children[i].T) {
+			return false
+		}
+	}
+	return true
 }

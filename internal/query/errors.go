@@ -17,21 +17,17 @@ var (
 )
 
 // FieldNotFoundError is returned when a field name is not present in the field map.
-type FieldNotFoundError struct {
-	Field string
-}
+type FieldNotFoundError string
 
 func (e FieldNotFoundError) Error() string {
-	return fmt.Sprintf("field not found: %s", e.Field)
+	return fmt.Sprintf("field not found: %s", string(e))
 }
 
 // InvalidOperatorError is returned when an operator string is not recognized.
-type InvalidOperatorError struct {
-	Operator string
-}
+type InvalidOperatorError string
 
 func (e InvalidOperatorError) Error() string {
-	return fmt.Sprintf("invalid operator: '%s'", e.Operator)
+	return fmt.Sprintf("invalid operator: '%s'", string(e))
 }
 
 // TypeMismatchError is returned when a value is incompatible with the field's declared type.
@@ -46,21 +42,17 @@ func (e TypeMismatchError) Error() string {
 }
 
 // InvalidExpressionError is returned when a filter segment cannot be parsed into field/operator/value.
-type InvalidExpressionError struct {
-	Expression string
-}
+type InvalidExpressionError string
 
 func (e InvalidExpressionError) Error() string {
-	return fmt.Sprintf("invalid filter expression: '%s'", e.Expression)
+	return fmt.Sprintf("invalid filter expression: '%s'", string(e))
 }
 
 // InvalidSortDirectionError is returned when a sort direction is not "asc" or "desc".
-type InvalidSortDirectionError struct {
-	Direction string
-}
+type InvalidSortDirectionError string
 
 func (e InvalidSortDirectionError) Error() string {
-	return fmt.Sprintf("invalid sort direction: '%s'", e.Direction)
+	return fmt.Sprintf("invalid sort direction: '%s'", string(e))
 }
 
 // InvalidPaginationError is returned when a pagination value cannot be parsed.

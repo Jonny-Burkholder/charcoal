@@ -48,3 +48,8 @@ var OperatorMap = map[string]int{
 	"!null":    OpNotNull,
 	"nnull":    OpNotNull,
 }
+
+// defining here so things don't blow up if it changes
+var FirstWords = []string{"not", "is"}
+
+var CannonicalStartRunes = []rune{'=', '!', '>', '<', '~', 'i', 'n', 'l', 'g'}

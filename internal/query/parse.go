@@ -4,6 +4,9 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
+	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -146,19 +149,23 @@ func isGroupToken(tok string) bool {
 	return false
 }
 
+// TODO: this function can be more DRY
 // parseFilterToken takes a filter query substring and parses the field, operator, and value into
 // a FilterToken. It returns an error if the token is malformed.
 func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, error) {
-	token := tokens.FilterToken{}
 	clause := tokens.Clause{}
 
-	tok = strings.TrimSpace(tok)
+	// normalize the token string
+	tok = strings.ToLower(strings.TrimSpace(tok))
 
 	var op *int // to check zero value
 	var field string
 	var fieldType filter.FieldType
+	var splitOp bool // to track if the user submitted a two-word operator like "not in"
+	var found bool   // did we find the token with this string split method?
 
 	// first, split on whitespace and see if we can get the whole token
+	fmt.Println("splitting token")
 	parts := strings.Fields(tok)
 	if len(parts) >= 2 {
 		field = parts[0]
@@ -169,54 +176,170 @@ func parseFilterToken(tok string, fields filter.Fields) (tokens.FilterToken, err
 		if opInt, ok := filter.OperatorMap[opCandidate]; ok {
 			op = &opInt
 		}
-	}
-
-	if field != "" && op != nil {
-		clause.Field = field
-		clause.Operator = *op
-	}
-
-	// if the operator is null or not null, we don't need a value.
-	// but if there is a value, the token is malformed
-
-	// if the operator is null or not null, we need to fetch a value
-	// if there's too many or too few parts, the token is malformed
-
-	// if that didn't work, search for canonical operators in the token not within quotes
-	var inSingleQuote, inDoubleQuote bool
-	for i := 0; i < len(tok); i++ {
-		r := tok[i]
-		switch r {
-		case runeSingleQuote:
-			if !inDoubleQuote {
-				inSingleQuote = !inSingleQuote
-			}
-		case runeDoubleQuote:
-			if !inSingleQuote {
-				inDoubleQuote = !inDoubleQuote
-			}
-		default:
-			if !inSingleQuote && !inDoubleQuote {
-				// check for operators at this position
-				for opStr := range filter.OperatorMap {
-					if strings.HasPrefix(tok[i:], opStr) {
-						op = opStr
-						opIndex = i
-						break
-					}
-				}
-				if op != "" {
-					break
+		// if that doesn't work, see if the op candidate is the first part of
+		// a valid operator
+		if op == nil && slices.Contains(filter.FirstWords, opCandidate) {
+			// get the second part and see if the two together are a valid operator
+			if len(parts) >= 3 {
+				opCandidate = opCandidate + " " + parts[2]
+				if opInt, ok := filter.OperatorMap[opCandidate]; ok {
+					op = &opInt
+					splitOp = true
 				}
 			}
 		}
 	}
 
-	return tokens.FilterToken{}, nil
+	if field != "" && op != nil {
+		clause.Field = field
+		clause.Operator = *op
+		found = true
+	}
+
+	// logic to do if we found an operator with the above method
+	if found {
+		// if the operator is null or not null, we don't need a value.
+		// but if there is a value, the token is malformed
+		if *op == filter.OpIsNull || *op == filter.OpNotNull {
+			if (!splitOp && len(parts) > 2) || (splitOp && len(parts) > 3) {
+				return tokens.FilterToken{}, InvalidExpressionError(tok)
+			}
+			return tokens.FilterToken{
+				Clauses: []tokens.Clause{clause},
+			}, nil
+		}
+
+		// otherwise, we need to fetch a value
+		// if there's too many or too few parts, the token is malformed
+		if (!splitOp && len(parts) != 3) || (splitOp && len(parts) != 4) {
+			return tokens.FilterToken{}, InvalidExpressionError(tok)
+		}
+
+		// the value is either the third part or the fourth part, depending on whether the operator was split
+		value := parts[len(parts)-1]
+
+		// normalize the filter value and validate that the value is compatible with the field type
+		value = normalizeFieldValue(value)
+		if !fieldTypeIsValid(value, fieldType) {
+			return tokens.FilterToken{}, TypeMismatchError{
+				Field:    field,
+				Value:    value,
+				Expected: fieldType,
+			}
+		}
+		clause.Value = value
+
+		return tokens.FilterToken{
+			Clauses: []tokens.Clause{clause},
+		}, nil
+	}
+
+	// if that didn't work - indexing!
+	// index the first quote instance - we'll only look before this
+	// If the operator is after the first quote, get good newb
+	fmt.Println("indexing quotes")
+	quoteIndex := strings.IndexAny(tok, `'"`)
+	subString := tok
+	if quoteIndex != -1 {
+		subString = tok[:quoteIndex]
+	}
+
+	var opString string
+	var opIndex int
+
+	// index any operator in the substring before the first quote
+	fmt.Println("indexing operators")
+	for opCandidate := range filter.OperatorMap {
+		if idx := strings.Index(subString, opCandidate); idx != -1 {
+			if opString != "" {
+				// more than one operator, bad query
+				return tokens.FilterToken{}, InvalidExpressionError(tok)
+			}
+			opString = opCandidate
+			opIndex = idx
+		}
+	}
+
+	if opString == "" {
+		return tokens.FilterToken{}, InvalidExpressionError(tok)
+	}
+
+	// we've got the operator and its index, let's split the string into field and value parts
+	fmt.Println("getting field and value")
+	field = strings.TrimSpace(tok[:opIndex])
+	value := strings.TrimSpace(tok[opIndex+len(opString):])
+
+	// validate the field exists in the field map
+	if typ, ok := fields[field]; ok {
+		fieldType = typ
+	} else {
+		return tokens.FilterToken{}, FieldNotFoundError(field)
+	}
+
+	// validate the operator
+	if opInt, ok := filter.OperatorMap[opString]; ok {
+		op = &opInt
+	} else {
+		return tokens.FilterToken{}, InvalidOperatorError(opString)
+	}
+
+	// normalize the filter value and validate that the value is compatible with the field type
+	value = normalizeFieldValue(value)
+	if !fieldTypeIsValid(value, fieldType) {
+		return tokens.FilterToken{}, TypeMismatchError{
+			Field:    field,
+			Value:    value,
+			Expected: fieldType,
+		}
+	}
+
+	clause.Field = field
+	clause.Operator = *op
+	clause.Value = value
+
+	return tokens.FilterToken{
+		Clauses: []tokens.Clause{clause},
+	}, nil
 }
 
 // parseGroupToken takes a group query substring and parses it into a Token tree
 // It returns an error if the token is malformed.
 func parseGroupToken(tok string) ([]tokens.FilterToken, error) {
+	// TODO: logic
 	return []tokens.FilterToken{}, nil
+}
+
+// normalizeFieldValue removes surrounding quotes from a field value and unescapes any escaped quotes within the value.
+func normalizeFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"') {
+			// remove surrounding quotes
+			value = value[1 : len(value)-1]
+			// unescape any escaped quotes within the value
+			value = strings.ReplaceAll(value, `\'`, `'`)
+			value = strings.ReplaceAll(value, `\"`, `"`)
+		}
+	}
+	return value
+}
+
+// fieldTypeIsValid checks if the value is compatible with the field type
+func fieldTypeIsValid(value string, fieldType filter.FieldType) bool {
+	switch fieldType {
+	case filter.TypeString:
+		return true // any value can be a string
+	case filter.TypeNumber:
+		if _, err := strconv.ParseFloat(value, 64); err == nil {
+			return true
+		}
+	case filter.TypeBool:
+		if _, err := strconv.ParseBool(value); err == nil {
+			return true
+		}
+	case filter.TypeBytes:
+		// idk what to do with this tbh
+		return true
+	}
+	return false
 }
