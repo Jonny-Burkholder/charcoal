@@ -3,6 +3,6 @@ package tokens
 type PaginationToken struct {
 	Paginate bool
 	Page     int
-	Limit    int
+	PerPage  int
 	Cursor   string
 }

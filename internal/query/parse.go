@@ -324,9 +324,10 @@ func stripOuterParens(tok string) string {
 		} else if ch == '"' && !inSingleQuote {
 			inDoubleQuote = !inDoubleQuote
 		} else if !inSingleQuote && !inDoubleQuote {
-			if ch == '(' {
+			switch ch {
+			case '(':
 				depth++
-			} else if ch == ')' {
+			case ')':
 				depth--
 				if depth == 0 {
 					if i == len(tok)-1 {
@@ -364,9 +365,10 @@ func splitTopLevel(tok string, sep string) []string {
 		} else if ch == '"' && !inSingleQuote {
 			inDoubleQuote = !inDoubleQuote
 		} else if !inSingleQuote && !inDoubleQuote {
-			if ch == '(' {
+			switch ch {
+			case '(':
 				parenDepth++
-			} else if ch == ')' {
+			case ')':
 				parenDepth--
 			}
 

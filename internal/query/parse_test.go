@@ -670,18 +670,325 @@ func TestParseGroupToken(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !tokensAreEqual(result, tc.expected) {
+			if !filterTokensAreEqual(result, tc.expected) {
 				t.Errorf("expected\n%+v\ngot\n%+v", tc.expected, result)
 			}
 		})
 	}
 }
 
+type parseSortTokensTestCase struct {
+	name        string
+	input       string
+	fields      filter.Fields
+	expected    tokens.SortToken
+	expectedErr error
+}
+
+var parseSortTokensTestCases = []parseSortTokensTestCase{
+	{
+		name:  "simple sort token",
+		input: "age:asc",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: []tokens.SortClause{
+			{
+				Field: "age",
+				Asc:   true,
+			},
+		},
+	},
+	{
+		name:  "multiple sort clauses",
+		input: "age:asc, name:desc",
+		fields: filter.Fields{
+			"age":  filter.TypeNumber,
+			"name": filter.TypeString,
+		},
+		expected: []tokens.SortClause{
+			{
+				Field: "age",
+				Asc:   true,
+			},
+			{
+				Field: "name",
+				Asc:   false,
+			},
+		},
+	},
+	{
+		name:  "sort clause with spaces",
+		input: "age : asc , name : desc",
+		fields: filter.Fields{
+			"age":  filter.TypeNumber,
+			"name": filter.TypeString,
+		},
+		expected: []tokens.SortClause{
+			{
+				Field: "age",
+				Asc:   true,
+			},
+			{
+				Field: "name",
+				Asc:   false,
+			},
+		},
+	},
+	{
+		name:        "invalid sort expression - missing colon",
+		input:       "age asc",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: InvalidSortExpressionError("age asc"),
+	},
+	{
+		name:        "invalid sort expression - too many colons",
+		input:       "age:asc:extra",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: InvalidSortExpressionError("age:asc:extra"),
+	},
+	{
+		name:        "field not found",
+		input:       "height:asc",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: FieldNotFoundError("height"),
+	},
+	{
+		name:        "invalid sort direction",
+		input:       "age:up",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: InvalidSortDirectionError("up"),
+	},
+	{
+		name:        "empty sort expression",
+		input:       "   ",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expected:    nil,
+		expectedErr: nil,
+	},
+	{
+		name:  "invalid sort expression - missing field",
+		input: ":asc",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: InvalidSortExpressionError(":asc"),
+	},
+	{
+		name:  "invalid sort expression - missing direction",
+		input: "age:",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: InvalidSortExpressionError("age:"),
+	},
+}
+
+func TestParseSortTokens(t *testing.T) {
+	for _, tc := range parseSortTokensTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseSortTokens(tc.input, tc.fields)
+			if !errors.Is(err, tc.expectedErr) {
+				t.Fatalf("expected error '%v', got '%v'", tc.expectedErr, err)
+			}
+			if !sortTokensAreEqual(result, tc.expected) {
+				t.Errorf("expected token '%v', got '%v'", tc.expected, result)
+			}
+		})
+	}
+}
+
+type parsePaginationTokensTestCase struct {
+	name        string
+	pagination  string
+	perPage     string
+	page        string
+	cursor      string
+	expected    tokens.PaginationToken
+	expectedErr []error
+}
+
+var parsePaginationTokensTestCases = []parsePaginationTokensTestCase{
+	{
+		name:       "no pagination",
+		pagination: "",
+		expected:   tokens.PaginationToken{},
+	},
+	{
+		name:       "valid pagination with page and per_page",
+		pagination: "true",
+		page:       "2",
+		perPage:    "20",
+		expected: tokens.PaginationToken{
+			Paginate: true,
+			Page:     2,
+			PerPage:  20,
+		},
+	},
+	{
+		name:       "valid pagination with cursor",
+		pagination: "true",
+		cursor:     "abc123",
+		perPage:    "20",
+		expected: tokens.PaginationToken{
+			Paginate: true,
+			Cursor:   "abc123",
+			PerPage:  20,
+			// Page is not required when using cursor-based pagination, so it can be left at its zero value
+			Page: 0,
+		},
+	},
+	{
+		name:        "invalid pagination value",
+		pagination:  "yes",
+		expectedErr: []error{InvalidPaginationError{"pagination", "yes"}},
+	},
+	{
+		name:        "page value is word - invalid", // should we fix this?
+		pagination:  "true",
+		page:        "two",
+		expectedErr: []error{InvalidPaginationError{"page", "two"}},
+	},
+	{
+		name:       "invalid values given",
+		pagination: "cool",
+		page:       "second",
+		perPage:    "gajillion",
+		expectedErr: []error{
+			InvalidPaginationError{"pagination", "cool"},
+			InvalidPaginationError{"page", "second"},
+			InvalidPaginationError{"per_page", "gajillion"},
+		},
+	},
+}
+
+func TestParsePaginationTokens(t *testing.T) {
+	for _, tc := range parsePaginationTokensTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parsePaginationTokens(tc.pagination, tc.perPage, tc.page, tc.cursor)
+			if len(tc.expectedErr) == 0 && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, expectedErr := range tc.expectedErr {
+				if !errors.Is(err, expectedErr) {
+					t.Errorf("expected error '%v' to be in '%v'", expectedErr, err)
+				}
+			}
+			if !paginationTokensAreEqual(result, tc.expected) {
+				t.Errorf("expected token '%v', got '%v'", tc.expected, result)
+			}
+		})
+	}
+}
+
+type parseTokensTestCase struct {
+	name        string
+	filter      string
+	sort        string
+	pagination  string
+	perPage     string
+	page        string
+	cursor      string
+	fields      filter.Fields
+	expected    tokens.Tokens
+	expectedErr []error
+}
+
+var parseTokenFields = filter.Fields{
+	"name":     filter.TypeString,
+	"age":      filter.TypeNumber,
+	"city":     filter.TypeString,
+	"isactive": filter.TypeBool,
+}
+
+var parseTokensTestCases = []parseTokensTestCase{
+	{
+		name:       "full query with all components",
+		filter:     "age>30, (name='John' OR name='Jane')",
+		sort:       "age:asc, name:desc",
+		pagination: "true",
+		perPage:    "20",
+		page:       "2",
+		fields:     parseTokenFields,
+		expected: tokens.Tokens{
+			Filter: []tokens.FilterToken{
+				{
+					Clauses: []tokens.Clause{
+						{
+							Field:    "age",
+							Operator: filter.OpGt,
+							Value:    "30",
+						},
+					},
+					JoinOp: tokens.OpOr,
+					Children: []tokens.NextFilterToken{
+						{
+							Op: tokens.OpOr,
+							T: tokens.FilterToken{
+								Clauses: []tokens.Clause{
+									{
+										Field:    "name",
+										Operator: filter.OpEq,
+										Value:    "John",
+									},
+									{
+										Field:    "name",
+										Operator: filter.OpEq,
+										Value:    "Jane",
+									},
+								},
+								JoinOp: tokens.OpAnd,
+							},
+						},
+					},
+				},
+			},
+			Sort: []tokens.SortClause{
+				{
+					Field: "age",
+					Asc:   true,
+				},
+				{
+					Field: "name",
+					Asc:   false,
+				},
+			},
+			Pagination: tokens.PaginationToken{
+				Paginate: true,
+				Page:     2,
+				PerPage:  20,
+			},
+		},
+	},
+	{
+		name:       "everything is invalid",
+		filter:     "age>>30, narm = 'John' OR name is 'Jane'",
+		sort:       "age up",
+		pagination: "yes",
+		perPage:    "many",
+		page:       "second",
+		fields:     parseTokenFields,
+		expectedErr: []error{
+			TypeMismatchError{
+				Field:    "age",
+				Value:    ">30",
+				Expected: filter.TypeNumber,
+			},
+			FieldNotFoundError("narm"),
+			InvalidExpressionError("name is 'Jane'"),
+			InvalidSortExpressionError("age up"),
+			InvalidPaginationError{"pagination", "yes"},
+			InvalidPaginationError{"per_page", "many"},
+			InvalidPaginationError{"page", "second"},
+		},
+	},
+}
+
 func clausesAreEqual(a, b tokens.Clause) bool {
 	return a.Field == b.Field && a.Operator == b.Operator && a.Value == b.Value
 }
 
-func tokensAreEqual(a, b tokens.FilterToken) bool {
+func filterTokensAreEqual(a, b tokens.FilterToken) bool {
 	if len(a.Clauses) != len(b.Clauses) {
 		return false
 	}
@@ -697,9 +1004,48 @@ func tokensAreEqual(a, b tokens.FilterToken) bool {
 		return false
 	}
 	for i := range a.Children {
-		if a.Children[i].Op != b.Children[i].Op || !tokensAreEqual(a.Children[i].T, b.Children[i].T) {
+		if a.Children[i].Op != b.Children[i].Op || !filterTokensAreEqual(a.Children[i].T, b.Children[i].T) {
 			return false
 		}
 	}
+	return true
+}
+
+func sortTokensAreEqual(a, b tokens.SortToken) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func paginationTokensAreEqual(a, b tokens.PaginationToken) bool {
+	return a.Paginate == b.Paginate && a.Page == b.Page && a.PerPage == b.PerPage && a.Cursor == b.Cursor
+}
+
+func tokensAreEqual(a, b tokens.Tokens) bool {
+
+	if len(a.Filter) != len(b.Filter) {
+		return false
+	}
+
+	for i := range a.Filter {
+		if !filterTokensAreEqual(a.Filter[i], b.Filter[i]) {
+			return false
+		}
+	}
+
+	if !sortTokensAreEqual(a.Sort, b.Sort) {
+		return false
+	}
+
+	if !paginationTokensAreEqual(a.Pagination, b.Pagination) {
+		return false
+	}
+
 	return true
 }

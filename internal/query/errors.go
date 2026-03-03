@@ -49,6 +49,12 @@ func (e InvalidExpressionError) Error() string {
 	return fmt.Sprintf("invalid filter expression: '%s'", string(e))
 }
 
+type InvalidSortExpressionError string
+
+func (e InvalidSortExpressionError) Error() string {
+	return fmt.Sprintf("invalid sort expression: '%s'", string(e))
+}
+
 // InvalidSortDirectionError is returned when a sort direction is not "asc" or "desc".
 type InvalidSortDirectionError string
 

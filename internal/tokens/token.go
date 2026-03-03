@@ -9,6 +9,6 @@ const (
 
 type Tokens struct {
 	Filter     []FilterToken
-	Sort       []SortToken
+	Sort       SortToken
 	Pagination PaginationToken
 }
