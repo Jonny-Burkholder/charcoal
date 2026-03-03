@@ -55,14 +55,11 @@ func splitFilterExpression(s string) []string {
 // splitTopLevel splits tok on comma or "or", but only when the separator
 // appears outside of single quotes, double quotes, and parentheses. The separator
 // is matched case-insensitively. All resulting segments are trimmed of whitespace.
-// it should be impossible for there to be mixed operators (, and "or") at this
-// point. We'll cover it with extensive testing
+// TODO: error on mixed operators
 func splitTopLevel(tok string) ([]string, tokens.JoinOp) {
 	tok = strings.TrimSpace(tok)
 	// remove any outer parens
-	for strings.HasPrefix(tok, "(") && strings.HasSuffix(tok, ")") {
-		tok = strings.TrimSpace(tok[1 : len(tok)-1])
-	}
+	tok = stripOuterParens(tok)
 
 	tokLower := strings.ToLower(tok)
 
@@ -99,10 +96,23 @@ func splitTopLevel(tok string) ([]string, tokens.JoinOp) {
 
 		if parenDepth == 0 && bracketDepth == 0 && !inSingleQuote && !inDoubleQuote {
 			if i+1 < len(tokLower) && tokLower[i:i+2] == "or" {
-				result = append(result, strings.TrimSpace(tok[lastSplit:i]))
-				lastSplit = i + 2
-				i++ // skip the 'r' in "or"
-				op = tokens.OpOr
+				prevOk := i == 0 || tokLower[i-1] == ' '
+				nextOk := i+2 >= len(tokLower) || tokLower[i+2] == ' '
+				if prevOk && nextOk {
+					result = append(result, strings.TrimSpace(tok[lastSplit:i]))
+					lastSplit = i + 2
+					i++ // skip the 'r' in "or"
+					op = tokens.OpOr
+				}
+			} else if i+2 < len(tokLower) && tokLower[i:i+3] == "and" {
+				prevOk := i == 0 || tokLower[i-1] == ' '
+				nextOk := i+3 >= len(tokLower) || tokLower[i+3] == ' '
+				if prevOk && nextOk {
+					result = append(result, strings.TrimSpace(tok[lastSplit:i]))
+					lastSplit = i + 3
+					i += 2 // skip the 'n' and 'd' in "and"
+					op = tokens.OpAnd
+				}
 			} else if tok[i] == ',' {
 				result = append(result, strings.TrimSpace(tok[lastSplit:i]))
 				lastSplit = i + 1

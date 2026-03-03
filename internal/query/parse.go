@@ -42,13 +42,14 @@ func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 	pageStr := params.Get("page")
 	cursorStr := params.Get("cursor")
 
+	var filterTokens []tokens.FilterToken
+	var clauses []tokens.Clause
 	// parse filter tokens
 	if filterStr != "" {
 		expressions, err := splitFilterTokens(filterStr)
 		if err != nil {
 			parseErr = errors.Join(parseErr, err)
 		} else {
-			var filterTokens []tokens.FilterToken
 			for _, expr := range expressions {
 				if isGroupToken(expr) {
 					ft, err := parseGroupToken(expr, fields)
@@ -63,14 +64,17 @@ func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 						parseErr = errors.Join(parseErr, err)
 						continue
 					}
-					filterTokens = append(filterTokens, tokens.FilterToken{
-						Clauses: []tokens.Clause{clause},
-					})
+					clauses = append(clauses, clause)
 				}
 			}
-			toks.Filter = filterTokens
 		}
 	}
+
+	filterTokens = append(filterTokens, tokens.FilterToken{
+		Clauses: clauses,
+	})
+
+	toks.Filter = filterTokens
 
 	// parse sort tokens
 	if sortStr != "" {
@@ -251,9 +255,24 @@ func isGroupToken(tok string) bool {
 			}
 		case 'o':
 			if !inSingleQuote && !inDoubleQuote && !inBracket {
-				// check if the next characters are "or"
+				// check if the next characters are "or" with word boundaries
 				if i+1 < len(tok) && tok[i+1] == 'r' {
-					return true
+					prevOk := i == 0 || tok[i-1] == ' '
+					nextOk := i+2 >= len(tok) || tok[i+2] == ' '
+					if prevOk && nextOk {
+						return true
+					}
+				}
+			}
+		case 'a':
+			if !inSingleQuote && !inDoubleQuote && !inBracket {
+				// check if the next characters are "and" with word boundaries
+				if i+2 < len(tok) && tok[i+1] == 'n' && tok[i+2] == 'd' {
+					prevOk := i == 0 || tok[i-1] == ' '
+					nextOk := i+3 >= len(tok) || tok[i+3] == ' '
+					if prevOk && nextOk {
+						return true
+					}
 				}
 			}
 		}
@@ -308,6 +327,9 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 			}
 		}
 		if op == nil {
+			if len(parts) == 3 {
+				opCandidate = normalizeCandidate(parts[1])
+			}
 			parseError = errors.Join(parseError, InvalidOperatorError(opCandidate))
 		}
 	}
@@ -514,6 +536,9 @@ func stripOuterParens(tok string) string {
 // parseGroupToken takes a group query substring and parses it into a Token tree.
 // It recursively splits the token into its component expressions and parses each one.
 // It returns an error if the token is malformed.
+// TODO: what we'll do to clean this up is 1. validate that the token is correct (mostly
+// that it only has one type of separator at the top level) 2. split based on the separator
+// that we got during validation. That will clean things up a lot
 func parseGroupToken(tok string, fields filter.Fields) (tokens.FilterToken, error) {
 	tok = strings.TrimSpace(tok)
 	tok = stripOuterParens(tok)
@@ -522,6 +547,7 @@ func parseGroupToken(tok string, fields filter.Fields) (tokens.FilterToken, erro
 
 	// split the top level
 	segments, op := splitTopLevel(tok)
+	result.JoinOp = op
 
 	var groupErr error
 
@@ -545,6 +571,10 @@ func parseGroupToken(tok string, fields filter.Fields) (tokens.FilterToken, erro
 			}
 			result.Clauses = append(result.Clauses, clause)
 		}
+	}
+
+	if groupErr != nil {
+		return tokens.FilterToken{}, errors.Join(ErrInvalidFilterExpression, groupErr)
 	}
 
 	return result, nil

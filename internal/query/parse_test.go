@@ -4,7 +4,6 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
-	"fmt"
 	"testing"
 )
 
@@ -126,6 +125,14 @@ var splitFilterTokensTestCases = []splitFilterTokensTestCase{
 		name:        "unbalanced brackets - missing open bracket",
 		input:       "name in john, barb, keith]",
 		expectedErr: ErrMismatchedBrackets,
+	},
+	{
+		name:  "the one that's failing the query test",
+		input: "age>>30, narm = 'John' OR name is 'Jane'",
+		expected: []string{
+			"age>>30",
+			"narm = 'John' OR name is 'Jane'",
+		},
 	},
 }
 
@@ -500,6 +507,20 @@ var parseFilterClauseTestCases = []parseFilterClauseTestCase{
 			"name": filter.TypeString,
 		},
 		expectedErr: InvalidExpressionError("name in"),
+	},
+	{
+		name:        "field not found - spaces",
+		input:       "narm = John",
+		fields:      filter.Fields{},
+		expectedErr: FieldNotFoundError("narm"),
+	},
+	{
+		name:  "invalid operator - spaces",
+		input: "name is Jane",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expectedErr: InvalidOperatorError("is"),
 	},
 }
 
@@ -1099,7 +1120,7 @@ var parseTokensTestCases = []parseTokensTestCase{
 				Expected: filter.TypeNumber,
 			},
 			FieldNotFoundError("narm"),
-			InvalidExpressionError("name is 'Jane'"),
+			InvalidOperatorError("is"),
 			InvalidSortExpressionError("age up"),
 			InvalidPaginationError{"pagination", "yes"},
 			InvalidPaginationError{"per_page", "many"},
@@ -1111,7 +1132,6 @@ var parseTokensTestCases = []parseTokensTestCase{
 func TestParse(t *testing.T) {
 	for _, tc := range parseTokensTestCases {
 		t.Run(tc.name, func(t *testing.T) {
-			fmt.Println("parsing query:", tc.query)
 			result, err := Parse(tc.query, tc.fields)
 			if len(tc.expectedErr) == 0 && err != nil {
 				t.Fatalf("unexpected error: %v", err)
