@@ -4,7 +4,7 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
-	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,18 +12,85 @@ import (
 
 // some runes for reference
 const (
-	runeSpace       = ' '
-	runeComma       = ','
-	runeSingleQuote = '\''
-	runeDoubleQuote = '"'
-	runeOpenParen   = '('
-	runeCloseParen  = ')'
+	runeSpace        = ' '
+	runeComma        = ','
+	runeSingleQuote  = '\''
+	runeDoubleQuote  = '"'
+	runeOpenParen    = '('
+	runeCloseParen   = ')'
+	runeOpenBracket  = '['
+	runeCloseBracket = ']'
 )
 
-// Parse parses a query string into a db-agnostic token tree
+// Parse parses a URL-encoded query string into a db-agnostic token tree.
+// The query string should contain URL query parameters such as filter, sort,
+// pagination, per_page, page, and cursor.
 func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 	toks := tokens.Tokens{}
 	var parseErr error
+
+	// parse URL query parameters
+	params, err := url.ParseQuery(queryStr)
+	if err != nil {
+		return tokens.Tokens{}, errors.Join(ErrParsingQuery, err)
+	}
+
+	filterStr := params.Get("filters")
+	sortStr := params.Get("sort")
+	paginationStr := params.Get("pagination")
+	perPageStr := params.Get("per_page")
+	pageStr := params.Get("page")
+	cursorStr := params.Get("cursor")
+
+	// parse filter tokens
+	if filterStr != "" {
+		expressions, err := splitFilterTokens(filterStr)
+		if err != nil {
+			parseErr = errors.Join(parseErr, err)
+		} else {
+			var filterTokens []tokens.FilterToken
+			for _, expr := range expressions {
+				if isGroupToken(expr) {
+					ft, err := parseGroupToken(expr, fields)
+					if err != nil {
+						parseErr = errors.Join(parseErr, err)
+						continue
+					}
+					filterTokens = append(filterTokens, ft)
+				} else {
+					clause, err := parseFilterClause(expr, fields)
+					if err != nil {
+						parseErr = errors.Join(parseErr, err)
+						continue
+					}
+					filterTokens = append(filterTokens, tokens.FilterToken{
+						Clauses: []tokens.Clause{clause},
+					})
+				}
+			}
+			toks.Filter = filterTokens
+		}
+	}
+
+	// parse sort tokens
+	if sortStr != "" {
+		sortTokens, err := parseSortTokens(sortStr, fields)
+		if err != nil {
+			parseErr = errors.Join(parseErr, err)
+		} else {
+			toks.Sort = sortTokens
+		}
+	}
+
+	// parse pagination tokens
+	if paginationStr != "" {
+		paginationToken, err := parsePaginationTokens(paginationStr, perPageStr, pageStr, cursorStr)
+		if err != nil {
+			parseErr = errors.Join(parseErr, err)
+		} else {
+			toks.Pagination = paginationToken
+		}
+	}
 
 	if parseErr != nil {
 		return tokens.Tokens{}, errors.Join(ErrParsingQuery, parseErr)
@@ -47,8 +114,8 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 	// if there's an open paren, we can ignore the rest until we find the matching close paren
 	// if we find a comma and we're not within quotes or parentheses, we split there
 	var indexes []int
-	var inSingleQuote, inDoubleQuote, inParens bool
-	var parenDepth int
+	var inSingleQuote, inDoubleQuote, inParens, inBrackets bool
+	var parenDepth, bracketDepth int
 	for i, r := range queryStr {
 		switch r {
 		case runeSingleQuote:
@@ -60,12 +127,12 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 				inDoubleQuote = !inDoubleQuote
 			}
 		case runeOpenParen:
-			if !inSingleQuote && !inDoubleQuote {
+			if !inSingleQuote && !inDoubleQuote && !inBrackets {
 				inParens = true
 				parenDepth++
 			}
 		case runeCloseParen:
-			if !inSingleQuote && !inDoubleQuote {
+			if !inSingleQuote && !inDoubleQuote && !inBrackets {
 				parenDepth--
 				if parenDepth == 0 {
 					inParens = false
@@ -73,8 +140,22 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 					splitErr = errors.Join(splitErr, ErrMismatchedParens)
 				}
 			}
+		case runeOpenBracket:
+			if !inSingleQuote && !inDoubleQuote {
+				inBrackets = true
+				bracketDepth++
+			}
+		case runeCloseBracket:
+			if !inSingleQuote && !inDoubleQuote {
+				bracketDepth--
+				if bracketDepth == 0 {
+					inBrackets = false
+				} else if bracketDepth < 0 {
+					splitErr = errors.Join(splitErr, ErrMismatchedBrackets)
+				}
+			}
 		case runeComma:
-			if !inSingleQuote && !inDoubleQuote && !inParens {
+			if !inSingleQuote && !inDoubleQuote && !inParens && !inBrackets {
 				indexes = append(indexes, i)
 			}
 		}
@@ -86,6 +167,10 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 
 	if parenDepth != 0 || inParens {
 		splitErr = errors.Join(splitErr, ErrMismatchedParens)
+	}
+
+	if bracketDepth != 0 || inBrackets {
+		splitErr = errors.Join(splitErr, ErrMismatchedBrackets)
 	}
 
 	if splitErr != nil {
@@ -115,8 +200,6 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 	// add the final segment after the last comma
 	res = append(res, strings.TrimSpace(queryStr[indexes[len(indexes)-1]+1:]))
 
-	fmt.Println(res)
-
 	return res, nil
 }
 
@@ -124,8 +207,8 @@ func splitFilterTokens(queryStr string) ([]string, error) {
 // 1. The token contains unquoted parentheses with valid separators (commas or "OR") within them.
 // 2. The token contains unquoted "OR" operators outside of any parentheses.
 func isGroupToken(tok string) bool {
-	var inSingleQuote, inDoubleQuote, inParen bool
-	var parenDepth int
+	var inSingleQuote, inDoubleQuote, inParen, inBracket bool
+	var parenDepth, bracketDepth int
 	tok = strings.ToLower(tok)
 
 	for i, r := range tok {
@@ -138,24 +221,36 @@ func isGroupToken(tok string) bool {
 			if !inSingleQuote {
 				inDoubleQuote = !inDoubleQuote
 			}
-		case runeOpenParen:
+		case runeOpenBracket:
 			if !inSingleQuote && !inDoubleQuote {
+				inBracket = true
+				bracketDepth++
+			}
+		case runeCloseBracket:
+			if !inSingleQuote && !inDoubleQuote {
+				bracketDepth--
+				if bracketDepth == 0 {
+					inBracket = false
+				}
+			}
+		case runeOpenParen:
+			if !inSingleQuote && !inDoubleQuote && !inBracket {
 				inParen = true
 				parenDepth++
 			}
 		case runeCloseParen:
-			if !inSingleQuote && !inDoubleQuote {
+			if !inSingleQuote && !inDoubleQuote && !inBracket {
 				parenDepth--
 				if parenDepth == 0 {
 					inParen = false
 				}
 			}
 		case runeComma:
-			if !inSingleQuote && !inDoubleQuote && inParen {
+			if !inSingleQuote && !inDoubleQuote && !inBracket && inParen {
 				return true
 			}
 		case 'o':
-			if !inSingleQuote && !inDoubleQuote {
+			if !inSingleQuote && !inDoubleQuote && !inBracket {
 				// check if the next characters are "or"
 				if i+1 < len(tok) && tok[i+1] == 'r' {
 					return true
@@ -167,7 +262,7 @@ func isGroupToken(tok string) bool {
 	return false
 }
 
-// TODO: this function can be more DRY
+// TODO: this function can be more DRY. A LOT more
 // parseFilterClause takes a filter query substring and parses the field, operator, and value into
 // a tokens.Clause. It returns an error if the clause is malformed.
 func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) {
@@ -183,11 +278,18 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 	var found bool   // did we find the token with this string split method?
 
 	// first, split on whitespace and see if we can get the whole token
-	parts := strings.Fields(tok)
+	parts := splitFilterExpression(tok)
+
+	var parseError error
+
+	// we'll just assume if there's the correct number of parts, the
+	// user is attempting to split on whitespace
 	if len(parts) >= 2 {
 		field = normalizeCandidate(parts[0])
 		if typ, ok := fields[field]; ok {
 			fieldType = typ
+		} else {
+			parseError = errors.Join(parseError, FieldNotFoundError(field))
 		}
 		opCandidate := normalizeCandidate(parts[1])
 		if opInt, ok := filter.OperatorMap[opCandidate]; ok {
@@ -205,6 +307,13 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 				}
 			}
 		}
+		if op == nil {
+			parseError = errors.Join(parseError, InvalidOperatorError(opCandidate))
+		}
+	}
+
+	if parseError != nil {
+		return tokens.Clause{}, errors.Join(ErrInvalidFilterExpression, parseError)
 	}
 
 	if field != "" && op != nil {
@@ -221,6 +330,39 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 			if (!splitOp && len(parts) > 2) || (splitOp && len(parts) > 3) {
 				return tokens.Clause{}, InvalidExpressionError(tok)
 			}
+			return clause, nil
+		}
+
+		// for "in" and "not in" operators, the expected value is a bracket-delimited list.
+		if *op == filter.OpIn || *op == filter.OpNotIn {
+			valueStart := 2
+			if splitOp {
+				valueStart = 3
+			}
+
+			if len(parts) != valueStart+1 {
+				return tokens.Clause{}, InvalidExpressionError(tok)
+			}
+
+			value := parts[valueStart]
+			if !validateSliceType(value, fieldType) {
+				return tokens.Clause{}, TypeMismatchError{
+					Field:    field,
+					Value:    value,
+					Expected: fieldType,
+				}
+			}
+
+			value = normalizeFieldValue(value)
+			if !fieldTypeIsValid(value, fieldType) {
+				return tokens.Clause{}, TypeMismatchError{
+					Field:    field,
+					Value:    value,
+					Expected: fieldType,
+				}
+			}
+
+			clause.Value = value
 			return clause, nil
 		}
 
@@ -290,11 +432,21 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 	}
 
 	// validate that the value is compatible with the field type
-	if !fieldTypeIsValid(value, fieldType) {
-		return tokens.Clause{}, TypeMismatchError{
-			Field:    field,
-			Value:    value,
-			Expected: fieldType,
+	if *op == filter.OpIn || *op == filter.OpNotIn {
+		if !validateSliceType(value, fieldType) {
+			return tokens.Clause{}, TypeMismatchError{
+				Field:    field,
+				Value:    value,
+				Expected: fieldType,
+			}
+		}
+	} else {
+		if !fieldTypeIsValid(value, fieldType) {
+			return tokens.Clause{}, TypeMismatchError{
+				Field:    field,
+				Value:    value,
+				Expected: fieldType,
+			}
 		}
 	}
 
@@ -303,6 +455,22 @@ func parseFilterClause(tok string, fields filter.Fields) (tokens.Clause, error) 
 	clause.Value = value
 
 	return clause, nil
+}
+
+// TODO: maybe return the indexes of the invalid values
+func validateSliceType(value string, fieldType filter.FieldType) bool {
+	// remove surrounding brackets and split on commas
+	val := strings.Trim(value, "[] ")
+	elements := strings.SplitSeq(val, ",")
+
+	for elem := range elements {
+		elem = strings.TrimSpace(elem)
+		if !fieldTypeIsValid(elem, fieldType) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // stripOuterParens removes the outermost parentheses from a token string if they
@@ -343,50 +511,6 @@ func stripOuterParens(tok string) string {
 	return tok
 }
 
-// splitTopLevel splits tok on the given separator, but only when the separator
-// appears outside of single quotes, double quotes, and parentheses. The separator
-// is matched case-insensitively. All resulting segments are trimmed of whitespace.
-func splitTopLevel(tok string, sep string) []string {
-	sep = strings.ToLower(sep)
-	sepLen := len(sep)
-	tokLower := strings.ToLower(tok)
-
-	var result []string
-	var inSingleQuote, inDoubleQuote bool
-	var parenDepth int
-	lastSplit := 0
-
-	i := 0
-	for i < len(tok) {
-		ch := tok[i]
-
-		if ch == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-		} else if ch == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-		} else if !inSingleQuote && !inDoubleQuote {
-			switch ch {
-			case '(':
-				parenDepth++
-			case ')':
-				parenDepth--
-			}
-
-			if parenDepth == 0 && i+sepLen <= len(tok) && tokLower[i:i+sepLen] == sep {
-				result = append(result, strings.TrimSpace(tok[lastSplit:i]))
-				lastSplit = i + sepLen
-				i += sepLen
-				continue
-			}
-		}
-
-		i++
-	}
-
-	result = append(result, strings.TrimSpace(tok[lastSplit:]))
-	return result
-}
-
 // parseGroupToken takes a group query substring and parses it into a Token tree.
 // It recursively splits the token into its component expressions and parses each one.
 // It returns an error if the token is malformed.
@@ -396,71 +520,33 @@ func parseGroupToken(tok string, fields filter.Fields) (tokens.FilterToken, erro
 
 	result := tokens.FilterToken{}
 
-	// first, try to split on top-level OR
-	orSegments := splitTopLevel(tok, " or ")
+	// split the top level
+	segments, op := splitTopLevel(tok)
 
-	if len(orSegments) > 1 {
-		result.JoinOp = tokens.OpOr
-		for _, seg := range orSegments {
-			seg = strings.TrimSpace(seg)
-			if seg != "" && seg[0] == '(' {
-				child, err := parseGroupToken(seg, fields)
-				if err != nil {
-					return tokens.FilterToken{}, err
-				}
-				result.Children = append(result.Children, tokens.NextFilterToken{
-					Op: tokens.OpOr,
-					T:  child,
-				})
-			} else {
-				clause, err := parseFilterClause(seg, fields)
-				if err != nil {
-					return tokens.FilterToken{}, err
-				}
-				result.Clauses = append(result.Clauses, clause)
+	var groupErr error
+
+	for _, segment := range segments {
+		if isGroupToken(segment) {
+			child, err := parseGroupToken(segment, fields)
+			if err != nil {
+				groupErr = errors.Join(groupErr, err)
+				continue
 			}
-		}
-		return result, nil
-	}
-
-	// no top-level OR — split on commas and AND (both are AND separators)
-	commaParts := splitTopLevel(tok, ",")
-	var andParts []string
-	for _, part := range commaParts {
-		subParts := splitTopLevel(strings.TrimSpace(part), " and ")
-		andParts = append(andParts, subParts...)
-	}
-
-	if len(andParts) > 1 {
-		result.JoinOp = tokens.OpAnd
-		for _, seg := range andParts {
-			seg = strings.TrimSpace(seg)
-			if seg != "" && seg[0] == '(' {
-				child, err := parseGroupToken(seg, fields)
-				if err != nil {
-					return tokens.FilterToken{}, err
-				}
-				result.Children = append(result.Children, tokens.NextFilterToken{
-					Op: tokens.OpAnd,
-					T:  child,
-				})
-			} else {
-				clause, err := parseFilterClause(seg, fields)
-				if err != nil {
-					return tokens.FilterToken{}, err
-				}
-				result.Clauses = append(result.Clauses, clause)
+			nextToken := tokens.NextFilterToken{
+				Op: op,
+				T:  child,
 			}
+			result.Children = append(result.Children, nextToken)
+		} else {
+			clause, err := parseFilterClause(segment, fields)
+			if err != nil {
+				groupErr = errors.Join(groupErr, err)
+				continue
+			}
+			result.Clauses = append(result.Clauses, clause)
 		}
-		return result, nil
 	}
 
-	// single clause — no splitting needed
-	clause, err := parseFilterClause(tok, fields)
-	if err != nil {
-		return tokens.FilterToken{}, err
-	}
-	result.Clauses = append(result.Clauses, clause)
 	return result, nil
 }
 
@@ -489,8 +575,25 @@ func normalizeFieldValue(value string) string {
 	return strings.TrimSpace(value)
 }
 
-// fieldTypeIsValid checks if the value is compatible with the field type
+// fieldTypeIsValid checks if the value is compatible with the field type.
+// For bracket-delimited list values like [a, b, c], each element is validated individually.
 func fieldTypeIsValid(value string, fieldType filter.FieldType) bool {
+	// check for bracket-delimited list values (used with "in" / "not in")
+	if len(value) >= 2 && value[0] == '[' && value[len(value)-1] == ']' {
+		inner := value[1 : len(value)-1]
+		elements := strings.Split(inner, ",")
+		for _, elem := range elements {
+			elem = strings.TrimSpace(elem)
+			if elem == "" {
+				continue
+			}
+			if !fieldTypeIsValid(elem, fieldType) {
+				return false
+			}
+		}
+		return true
+	}
+
 	switch fieldType {
 	case filter.TypeString:
 		return true // any value can be a string

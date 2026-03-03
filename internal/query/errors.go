@@ -10,6 +10,7 @@ var (
 	ErrParsingQuery                = errors.New("unable to parse query string")
 	ErrMalformedFilterString       = errors.New("malformed filter string")
 	ErrMismatchedParens            = errors.New("unmatched parentheses in filter string")
+	ErrMismatchedBrackets          = errors.New("unmatched brackets in filter string")
 	ErrMismatchedQuotes            = errors.New("unmatched quotes in filter string")
 	ErrMultipleOps                 = errors.New("multiple operators in filter expression")
 	ErrInvalidFilterExpression     = errors.New("invalid filter expression")

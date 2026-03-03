@@ -4,6 +4,7 @@ import (
 	"charcoal/internal/filter"
 	"charcoal/internal/tokens"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -101,6 +102,31 @@ var splitFilterTokensTestCases = []splitFilterTokensTestCase{
 		input:       "name='John, age>30, name='Jane'",
 		expectedErr: ErrMismatchedQuotes,
 	},
+	{
+		name:     "expression with bracket list value",
+		input:    "name in [john, barb, keith], age > 30",
+		expected: []string{"name in [john, barb, keith]", "age > 30"},
+	},
+	{
+		name:     "expression with bracket list and other filters",
+		input:    "city = 'NY', name in [john, barb, keith], age > 30",
+		expected: []string{"city = 'NY'", "name in [john, barb, keith]", "age > 30"},
+	},
+	{
+		name:     "bracket list with spaces",
+		input:    "name in [john, barb, keith]",
+		expected: []string{"name in [john, barb, keith]"},
+	},
+	{
+		name:        "unbalanced brackets - missing close bracket",
+		input:       "name in [john, barb, keith",
+		expectedErr: ErrMismatchedBrackets,
+	},
+	{
+		name:        "unbalanced brackets - missing open bracket",
+		input:       "name in john, barb, keith]",
+		expectedErr: ErrMismatchedBrackets,
+	},
 }
 
 func TestSplitFilterTokens(t *testing.T) {
@@ -150,9 +176,19 @@ var isGroupTokenTestCases = []isGroupTokenTestCase{
 		expected: false,
 	},
 	{
-		name:     "malformed token - it doesn't matter",
+		name:     "no parens - it doesn't matter",
 		input:    "name='John' OR name='Jane'",
 		expected: true,
+	},
+	{
+		name:     "in query with brackets is not a group token",
+		input:    "name in [john, barb, keith]",
+		expected: false,
+	},
+	{
+		name:     "not in query with brackets is not a group token",
+		input:    "name not in [john, barb, keith]",
+		expected: false,
 	},
 }
 
@@ -283,13 +319,12 @@ var parseFilterClauseTestCases = []parseFilterClauseTestCase{
 			Operator: filter.OpIsNull,
 		},
 	},
-	// TODO: can this case be made valid with our current parsing logic?
-	// {
-	// 	name:        "invalid operator",
-	// 	input:       "age >> 30",
-	// 	fields:      filter.Fields{"age": filter.TypeNumber},
-	// 	expectedErr: InvalidOperatorError(">>"),
-	// },
+	{
+		name:        "invalid operator",
+		input:       "age >> 30",
+		fields:      filter.Fields{"age": filter.TypeNumber},
+		expectedErr: InvalidOperatorError(">>"),
+	},
 	{
 		name:  "invalid operator causes invalid value error",
 		input: "age>>30",
@@ -410,6 +445,62 @@ var parseFilterClauseTestCases = []parseFilterClauseTestCase{
 		},
 		expectedErr: InvalidExpressionError("age30"),
 	},
+	{
+		name:  "in operator with bracket list",
+		input: "name in [john, barb, keith]",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expected: tokens.Clause{
+			Field:    "name",
+			Operator: filter.OpIn,
+			Value:    "[john, barb, keith]",
+		},
+	},
+	{
+		name:  "not in operator with bracket list",
+		input: "name not in [john, barb, keith]",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expected: tokens.Clause{
+			Field:    "name",
+			Operator: filter.OpNotIn,
+			Value:    "[john, barb, keith]",
+		},
+	},
+	{
+		name:  "in operator with number list",
+		input: "age in [20, 30, 40]",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expected: tokens.Clause{
+			Field:    "age",
+			Operator: filter.OpIn,
+			Value:    "[20, 30, 40]",
+		},
+	},
+	{
+		name:  "in operator with type mismatch in list",
+		input: "age in [20, thirty, 40]",
+		fields: filter.Fields{
+			"age": filter.TypeNumber,
+		},
+		expectedErr: TypeMismatchError{
+			Field:    "age",
+			Value:    "[20, thirty, 40]",
+			Expected: filter.TypeNumber,
+		},
+	},
+	{
+		name:  "in operator missing value",
+		input: "name in",
+		fields: filter.Fields{
+			"name": filter.TypeString,
+		},
+		expectedErr: InvalidExpressionError("name in"),
+	},
 }
 
 func TestParseFilterClause(t *testing.T) {
@@ -426,13 +517,13 @@ func TestParseFilterClause(t *testing.T) {
 	}
 }
 
-type testSplitGroupTokenTestCase struct {
+type testParseGroupTokenTestCase struct {
 	name     string
 	input    string
 	expected tokens.FilterToken
 }
 
-var testSplitGroupTokenTestCases = []testSplitGroupTokenTestCase{
+var testParseGroupTokenTestCases = []testParseGroupTokenTestCase{
 	{
 		name:  "simple group token",
 		input: "(name='John', name='Jane')",
@@ -655,6 +746,25 @@ var testSplitGroupTokenTestCases = []testSplitGroupTokenTestCase{
 			},
 		},
 	},
+	{
+		name:  "simple spaces, no parentheses",
+		input: "name = 'John' OR name = 'Jane'",
+		expected: tokens.FilterToken{
+			Clauses: []tokens.Clause{
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "John",
+				},
+				{
+					Field:    "name",
+					Operator: filter.OpEq,
+					Value:    "Jane",
+				},
+			},
+			JoinOp: tokens.OpOr,
+		},
+	},
 }
 
 var groupTokenTestFields = filter.Fields{
@@ -664,7 +774,7 @@ var groupTokenTestFields = filter.Fields{
 }
 
 func TestParseGroupToken(t *testing.T) {
-	for _, tc := range testSplitGroupTokenTestCases {
+	for _, tc := range testParseGroupTokenTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := parseGroupToken(tc.input, groupTokenTestFields)
 			if err != nil {
@@ -883,12 +993,7 @@ func TestParsePaginationTokens(t *testing.T) {
 
 type parseTokensTestCase struct {
 	name        string
-	filter      string
-	sort        string
-	pagination  string
-	perPage     string
-	page        string
-	cursor      string
+	query       string
 	fields      filter.Fields
 	expected    tokens.Tokens
 	expectedErr []error
@@ -902,72 +1007,91 @@ var parseTokenFields = filter.Fields{
 }
 
 var parseTokensTestCases = []parseTokensTestCase{
+	// {
+	// 	name:   "full query with all components",
+	// 	query:  "filters=age>30, (name='John' OR name='Jane')&sort=age:asc, name:desc&pagination=true&page=2&per_page=20",
+	// 	fields: parseTokenFields,
+	// 	expected: tokens.Tokens{
+	// 		Filter: []tokens.FilterToken{
+	// 			{
+	// 				Clauses: []tokens.Clause{
+	// 					{
+	// 						Field:    "age",
+	// 						Operator: filter.OpGt,
+	// 						Value:    "30",
+	// 					},
+	// 				},
+	// 			},
+	// 			{
+	// 				Clauses: []tokens.Clause{
+	// 					{
+	// 						Field:    "name",
+	// 						Operator: filter.OpEq,
+	// 						Value:    "John",
+	// 					},
+	// 					{
+	// 						Field:    "name",
+	// 						Operator: filter.OpEq,
+	// 						Value:    "Jane",
+	// 					},
+	// 				},
+	// 				JoinOp: tokens.OpOr,
+	// 			},
+	// 		},
+	// 		Sort: []tokens.SortClause{
+	// 			{
+	// 				Field: "age",
+	// 				Asc:   true,
+	// 			},
+	// 			{
+	// 				Field: "name",
+	// 				Asc:   false,
+	// 			},
+	// 		},
+	// 		Pagination: tokens.PaginationToken{
+	// 			Paginate: true,
+	// 			Page:     2,
+	// 			PerPage:  20,
+	// 		},
+	// 	},
+	// },
+	// {
+	// 	name:   "query with in operator",
+	// 	query:  "filters=name in [john, barb, keith], age > 30&sort=name:asc",
+	// 	fields: parseTokenFields,
+	// 	expected: tokens.Tokens{
+	// 		Filter: []tokens.FilterToken{
+	// 			{
+	// 				Clauses: []tokens.Clause{
+	// 					{
+	// 						Field:    "name",
+	// 						Operator: filter.OpIn,
+	// 						Value:    "[john, barb, keith]",
+	// 					},
+	// 				},
+	// 			},
+	// 			{
+	// 				Clauses: []tokens.Clause{
+	// 					{
+	// 						Field:    "age",
+	// 						Operator: filter.OpGt,
+	// 						Value:    "30",
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 		Sort: []tokens.SortClause{
+	// 			{
+	// 				Field: "name",
+	// 				Asc:   true,
+	// 			},
+	// 		},
+	// 	},
+	// },
 	{
-		name:       "full query with all components",
-		filter:     "age>30, (name='John' OR name='Jane')",
-		sort:       "age:asc, name:desc",
-		pagination: "true",
-		perPage:    "20",
-		page:       "2",
-		fields:     parseTokenFields,
-		expected: tokens.Tokens{
-			Filter: []tokens.FilterToken{
-				{
-					Clauses: []tokens.Clause{
-						{
-							Field:    "age",
-							Operator: filter.OpGt,
-							Value:    "30",
-						},
-					},
-					JoinOp: tokens.OpOr,
-					Children: []tokens.NextFilterToken{
-						{
-							Op: tokens.OpOr,
-							T: tokens.FilterToken{
-								Clauses: []tokens.Clause{
-									{
-										Field:    "name",
-										Operator: filter.OpEq,
-										Value:    "John",
-									},
-									{
-										Field:    "name",
-										Operator: filter.OpEq,
-										Value:    "Jane",
-									},
-								},
-								JoinOp: tokens.OpAnd,
-							},
-						},
-					},
-				},
-			},
-			Sort: []tokens.SortClause{
-				{
-					Field: "age",
-					Asc:   true,
-				},
-				{
-					Field: "name",
-					Asc:   false,
-				},
-			},
-			Pagination: tokens.PaginationToken{
-				Paginate: true,
-				Page:     2,
-				PerPage:  20,
-			},
-		},
-	},
-	{
-		name:       "everything is invalid",
-		filter:     "age>>30, narm = 'John' OR name is 'Jane'",
-		sort:       "age up",
-		pagination: "yes",
-		perPage:    "many",
-		page:       "second",
-		fields:     parseTokenFields,
+		name:   "everything is invalid",
+		query:  "filters=age>>30, narm = 'John' OR name is 'Jane'&sort=age up&pagination=yes&page=second&per_page=many",
+		fields: parseTokenFields,
 		expectedErr: []error{
 			TypeMismatchError{
 				Field:    "age",
@@ -982,6 +1106,29 @@ var parseTokensTestCases = []parseTokensTestCase{
 			InvalidPaginationError{"page", "second"},
 		},
 	},
+}
+
+func TestParse(t *testing.T) {
+	for _, tc := range parseTokensTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fmt.Println("parsing query:", tc.query)
+			result, err := Parse(tc.query, tc.fields)
+			if len(tc.expectedErr) == 0 && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(tc.expectedErr) > 0 && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			for _, expectedErr := range tc.expectedErr {
+				if !errors.Is(err, expectedErr) {
+					t.Errorf("expected error '%v' to be in '%v'", expectedErr, err)
+				}
+			}
+			if len(tc.expectedErr) == 0 && !tokensAreEqual(result, tc.expected) {
+				t.Errorf("expected\n%+v\ngot\n%+v", tc.expected, result)
+			}
+		})
+	}
 }
 
 func clausesAreEqual(a, b tokens.Clause) bool {
