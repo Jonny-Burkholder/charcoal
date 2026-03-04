@@ -1,7 +1,6 @@
 package filter
 
 import (
-	"charcoal/internal/tokens"
 	"encoding/json"
 	"reflect"
 )
@@ -61,14 +60,6 @@ func New(data any, config ...Config) (Filter, error) {
 	}
 
 	return f, nil
-}
-
-func (f Filter) Activate(query string) Result {
-	// TODO: import cycle. I may have to flatten the structure, which is probably for the best anyway
-	return Result{
-		Tokens: tokens.Tokens{},
-		Error:  nil,
-	}
 }
 
 func autoDetect(obj any) (dataKind, error) {
