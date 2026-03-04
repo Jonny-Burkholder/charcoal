@@ -1,4 +1,4 @@
-package filter
+package charcoal
 
 import "charcoal/internal/tokens"
 

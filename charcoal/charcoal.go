@@ -7,6 +7,7 @@ import (
 
 type charcoal struct {
 	filter.Filter
+	in integrations
 }
 
 func Filter(data any, config ...filter.Config) (charcoal, error) {
@@ -19,9 +20,9 @@ func Filter(data any, config ...filter.Config) (charcoal, error) {
 	}, nil
 }
 
-func (c charcoal) Activate(queryStr string) filter.Result {
+func (c charcoal) Activate(queryStr string) Result {
 	tokens, err := query.Parse(queryStr, c.Fields)
-	return filter.Result{
+	return Result{
 		Tokens: tokens,
 		Error:  err,
 	}

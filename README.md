@@ -72,9 +72,9 @@ Just like that, with only a few lines of code and no manual filter work, your us
 
 Now that you have the filters, and the user query, all you have to do is convert it into a form that your preferred data backend can read. This can be done through one of the several built-in integrations, or you can design your own to suit your needs. Here's how the built-in integrations work:
 
-`sql, err := filter.Activate(query).ToMySQL()`
+`sql, err := filter.Activate(query).ToSQL()`
 
-The sql will be a string that you can pass right to your mysql repository functions. For custom integrations, you'll simply pass in your result from the `filter.Activate` function into the custom integration:
+The sql will be a string that you can pass right to your sql repository functions. For custom integrations, you'll simply pass in your result from the `filter.Activate` function into the custom integration:
 
 ```
 import (
