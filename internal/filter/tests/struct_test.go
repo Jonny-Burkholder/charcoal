@@ -89,7 +89,7 @@ var structTests = []structTest{
 func TestStruct(t *testing.T) {
 	for _, testCase := range structTests {
 		t.Run(testCase.name, func(t *testing.T) {
-			f := filter.New(testCase.config)
+			f, _ := filter.New(testCase.config)
 			fields, err := f.Struct(testCase.input)
 			if err != testCase.err {
 				t.Fatalf("expected error %v, got %v", testCase.err, err)

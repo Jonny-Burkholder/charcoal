@@ -76,7 +76,7 @@ var removeIndirectsTests = []removeIndirectsTest{
 }
 
 func TestRemoveIndirects(t *testing.T) {
-	f := New(&Config{MaxIndirects: 2})
+	f, _ := New(struct{}{}, Config{MaxIndirects: 2})
 	fmt.Println("max indirects:", f.config.MaxIndirects)
 
 	for _, tt := range removeIndirectsTests {

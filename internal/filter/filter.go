@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"charcoal/internal/tokens"
 	"encoding/json"
 	"reflect"
 )
@@ -23,18 +24,50 @@ type Filter struct {
 // are done through the filter object. I was
 // very tempted to call this "Activate", but
 // I'll have to find something else for that
-func New(config *Config) Filter {
+func New(data any, config ...Config) (Filter, error) {
 	var cfg Config
-	if config == nil {
+	if len(config) == 0 {
 		cfg = defaultConfig()
 	} else {
-		cfg = *config
+		cfg = config[0]
 		if err := cfg.validate(); err != nil {
 			panic(err)
 		}
 	}
-	return Filter{
+	f := Filter{
 		config: cfg,
+	}
+
+	kind, err := autoDetect(data)
+	if err != nil {
+		return Filter{}, err
+	}
+
+	switch kind {
+	case kindStruct:
+		fields, err := f.Struct(data)
+		if err != nil {
+			return Filter{}, err
+		}
+		f.Fields = fields
+	case kindJSON:
+		fields, err := f.JSON(data)
+		if err != nil {
+			return Filter{}, err
+		}
+		f.Fields = fields
+	default:
+		panic("unreachable") // TODO: better error handling here
+	}
+
+	return f, nil
+}
+
+func (f Filter) Activate(query string) Result {
+	// TODO: import cycle. I may have to flatten the structure, which is probably for the best anyway
+	return Result{
+		Tokens: tokens.Tokens{},
+		Error:  nil,
 	}
 }
 
