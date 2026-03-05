@@ -96,4 +96,4 @@ So there you have it! Filtering, made easy, for everyone.
 
 This repo is still a work in progress, but I'm working hard to get it ready for prime-time.
 
-Like the work I'm doing in this repo? (Buy me a coffee)[https://buymeacoffee.com/jonnyburkholder]
+Like the work I'm doing in this repo? [Buy me a coffee](https://buymeacoffee.com/jonnyburkholder)
