@@ -13,3 +13,10 @@ const (
 
 // Fields maps a filter's name to its data type
 type Fields map[string]FieldType
+
+func (f Filter) AddField(name string, fieldType FieldType) {
+	if f.Fields == nil {
+		f.Fields = make(Fields)
+	}
+	f.Fields[name] = fieldType
+}

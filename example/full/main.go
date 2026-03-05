@@ -16,16 +16,16 @@ func main() {
 	graphQLHandler, mongoHandler, sqlHandler := getHandlers()
 
 	// SQL
-	mux.Handle("GET mysql/users", sqlHandler.GetUsers)
-	mux.Handle("GET mysql/books", sqlHandler.GetBooks)
+	mux.HandleFunc("GET mysql/users", sqlHandler.GetUsers)
+	mux.HandleFunc("GET mysql/books", sqlHandler.GetBooks)
 
 	// Mongo
-	mux.Handle("GET mongo/users", mongoHandler.GetUsers)
-	mux.Handle("GET mongo/books", mongoHandler.GetBooks)
+	mux.HandleFunc("GET mongo/users", mongoHandler.GetUsers)
+	mux.HandleFunc("GET mongo/books", mongoHandler.GetBooks)
 
 	// GraphQL
-	mux.Handle("GET graphql/users", graphQLHandler.ServeHTTP)
-	mux.Handle("GET graphql/books", graphQLHandler.ServeHTTP)
+	mux.HandleFunc("GET graphql/users", graphQLHandler.GetUsers)
+	mux.HandleFunc("GET graphql/books", graphQLHandler.GetBooks)
 
 	http.ListenAndServe(":8080", mux)
 }

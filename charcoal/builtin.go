@@ -1,31 +1,61 @@
 package charcoal
 
+import (
+	"charcoal/internal/query"
+	"charcoal/internal/tokens"
+)
+
 // builtin.go contains logic for working with the built-in data layer integrations
 
-type integrations struct {
+type sqlAdapter interface {
+	TokensToSql(tokens tokens.Tokens) (string, error)
 }
 
-func (c charcoal) ToSql(res Result) (string, error) {
+type mongoAdapter interface {
+	TokensToMongo(tokens tokens.Tokens) (string, error)
+}
+
+type elasticAdapter interface {
+	TokensToElastic(tokens tokens.Tokens) (string, error)
+}
+
+type redisAdapter interface {
+	TokensToRedis(tokens tokens.Tokens) (string, error)
+}
+
+type graphQLAdapter interface {
+	TokensToGraphQL(tokens tokens.Tokens) (string, error)
+}
+
+type builtin struct {
+	sqlAdapter
+	mongoAdapter
+	elasticAdapter
+	redisAdapter
+	graphQLAdapter
+}
+
+func (c charcoal) ToSql(queryString string) (string, error) {
 	// TODO: use built-in integrations to convert tokens to SQL
-	// I need to rework this a little bit - the integration needs to
-	// be able to have knowledge of the data schema. Ideally they could
-	// just be stored in the charcoal struct, but I can't really define
-	// an interface that's satisfactory for all the disparate data types
+	toks, err := query.Parse(queryString, c.Filter.Fields)
+	if err != nil {
+		return "", err
+	}
+	return c.sqlAdapter.TokensToSql(toks)
+}
+
+func (c charcoal) ToMongo(query string) (string, error) {
 	return "", nil
 }
 
-func (c charcoal) ToMongo(res Result) (string, error) {
+func (c charcoal) ToElastic(query string) (string, error) {
 	return "", nil
 }
 
-func (c charcoal) ToElastic(res Result) (string, error) {
+func (c charcoal) ToRedis(query string) (string, error) {
 	return "", nil
 }
 
-func (c charcoal) ToRedis(res Result) (string, error) {
-	return "", nil
-}
-
-func (c charcoal) ToGraphQL(res Result) (string, error) {
+func (c charcoal) ToGraphQL(query string) (string, error) {
 	return "", nil
 }

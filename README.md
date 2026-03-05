@@ -55,7 +55,7 @@ That's really it! All you need to do. Charcoal will automatically go through and
 ```
 query := "filters=name = Bob, occupation = Tomato"
 
-result := filter.Activate(query)
+sql := filter.ToSQL(query)
 ```
 
 You may have noticed we used a field that wasn't present in the original struct. Not to worry, charcoal will give us a very specific error telling the user exactly how to fix the mistake:
@@ -72,9 +72,9 @@ Just like that, with only a few lines of code and no manual filter work, your us
 
 Now that you have the filters, and the user query, all you have to do is convert it into a form that your preferred data backend can read. This can be done through one of the several built-in integrations, or you can design your own to suit your needs. Here's how the built-in integrations work:
 
-`sql, err := filter.Activate(query).ToSQL()`
+`sql, err := filter.ToSQL(query)`
 
-The sql will be a string that you can pass right to your sql repository functions. For custom integrations, you'll simply pass in your result from the `filter.Activate` function into the custom integration:
+The sql will be a string that you can pass right to your sql repository functions. For custom integrations, it's almost just as simple. Activate the filter to get the tokens, and pass the result into the custom integration:
 
 ```
 import (
@@ -85,9 +85,9 @@ import (
 filter, _ := charcoal.New(myDataType)
 integration := obscuredb.New()
 
-result, _ := filter.Activate(userQuery)
+tokens, _ := filter.Activate(userQuery)
 
-transaction, _ := integration.ToObscureDBTransaction(result)
+transaction, _ := integration.ToObscureDBTransaction(tokens)
 
 ```
 

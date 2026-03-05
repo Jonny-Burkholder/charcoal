@@ -3,11 +3,12 @@ package charcoal
 import (
 	"charcoal/internal/filter"
 	"charcoal/internal/query"
+	"charcoal/internal/tokens"
 )
 
 type charcoal struct {
 	filter.Filter
-	in integrations
+	builtin
 }
 
 func Filter(data any, config ...filter.Config) (charcoal, error) {
@@ -20,10 +21,6 @@ func Filter(data any, config ...filter.Config) (charcoal, error) {
 	}, nil
 }
 
-func (c charcoal) Activate(queryStr string) Result {
-	tokens, err := query.Parse(queryStr, c.Fields)
-	return Result{
-		Tokens: tokens,
-		Error:  err,
-	}
+func (c charcoal) Activate(queryStr string) (tokens.Tokens, error) {
+	return query.Parse(queryStr, c.Fields)
 }

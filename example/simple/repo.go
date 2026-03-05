@@ -1,8 +1,13 @@
 package main
 
-import "charcoal/charcoal"
+import (
+	"charcoal/charcoal"
+	"fmt"
+)
 
-type userRepo struct{}
+type userRepo struct {
+	db mockDB
+}
 
 func NewUserRepo() userRepo {
 	return userRepo{}
@@ -15,12 +20,12 @@ func (r userRepo) GetUsers(query string) ([]User, error) {
 		return nil, err
 	}
 
-	result := filter.Activate(query)
-	if result.Error != nil {
-		return nil, result.Error
+	sql, err := filter.ToSql(query)
+	if err != nil {
+		return nil, fmt.Errorf("error converting query to SQL: %w", err)
 	}
 
-	return mockDB{}.Query(query)
+	return r.db.Query(sql)
 
 }
 
