@@ -1,4 +1,4 @@
-package mysql
+package sql
 
 import (
 	"charcoal/internal/filter"
@@ -18,7 +18,7 @@ type Result struct {
 	Args       []any  // positional bind args across all clauses
 }
 
-// operatorSQL maps filter operator constants to their MySQL SQL representation.
+// operatorSQL maps filter operator constants to their SQL representation.
 // Operators like IN, IS NULL, and IS NOT NULL need special handling and are
 // dealt with separately.
 var operatorSQL = map[int]string{
@@ -32,7 +32,7 @@ var operatorSQL = map[int]string{
 	filter.OpNotLike: "NOT LIKE",
 }
 
-// Build converts a db-agnostic token tree into parameterized MySQL query
+// Build converts a db-agnostic token tree into parameterized SQL query
 // fragments. It returns an error if the config is invalid or a token
 // contains an unsupported operator.
 func Build(cfg Config, toks tokens.Tokens) (Result, error) {
@@ -315,16 +315,11 @@ func buildOrderBy(cfg Config, sort tokens.SortToken) string {
 
 // buildPagination produces a LIMIT/OFFSET clause from pagination tokens.
 func buildPagination(p tokens.PaginationToken) (string, []any) {
-	if p.PerPage <= 0 {
+	if p.Limit <= 0 {
 		return "", nil
 	}
 
-	offset := 0
-	if p.Page > 1 {
-		offset = (p.Page - 1) * p.PerPage
-	}
-
-	return "LIMIT ? OFFSET ?", []any{p.PerPage, offset}
+	return "LIMIT ? OFFSET ?", []any{p.Limit, p.Offset}
 }
 
 // buildJoins auto-prunes the configured joins to include only those

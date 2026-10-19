@@ -6,47 +6,34 @@ import (
 	"strconv"
 )
 
-func parsePaginationTokens(pagination, perPage, page, cursor string) (tokens.PaginationToken, error) {
-	if pagination == "" {
-		return tokens.PaginationToken{}, nil
-	}
+const maxOffsetDefault = 5000
 
+func parsePaginationTokens(limit, offset string, maxOffset ...uint) (tokens.PaginationToken, error) {
 	var token tokens.PaginationToken
 	var paginationErr error
 
-	// validate the values for each pagination parameter
-
-	paginationBool, err := strconv.ParseBool(pagination)
-	if err != nil {
-		paginationErr = errors.Join(paginationErr, InvalidPaginationError{"pagination", pagination})
-	} else {
-		token.Paginate = paginationBool
-	}
-
-	if !token.Paginate && paginationErr == nil {
-		// if pagination is false, we ignore the other pagination parameters
-		return token, nil
-	}
-
-	if perPage != "" {
-		perPageToken, err := strconv.Atoi(perPage)
-		if err != nil {
-			paginationErr = errors.Join(paginationErr, InvalidPaginationError{"per_page", perPage})
+	// validate the values for each limit and offset
+	if limit != "" {
+		limitToken, err := strconv.Atoi(limit)
+		if err != nil || limitToken < 0 {
+			paginationErr = errors.Join(paginationErr, InvalidPaginationError{"limit", limit})
 		} else {
-			token.PerPage = perPageToken
+			token.Limit = uint(limitToken)
 		}
 	}
-	if page != "" {
-		pageToken, err := strconv.Atoi(page)
-		if err != nil {
-			paginationErr = errors.Join(paginationErr, InvalidPaginationError{"page", page})
-		} else {
-			token.Page = pageToken
+	if offset != "" {
+		maxOff := uint(maxOffsetDefault)
+		if maxOffset != nil {
+			maxOff = maxOffset[0]
 		}
-	}
-	if cursor != "" {
-		// TODO: I have to refresh on how cursor values work
-		token.Cursor = cursor
+		offsetToken, err := strconv.Atoi(offset)
+		if err != nil {
+			paginationErr = errors.Join(paginationErr, InvalidPaginationError{"offset", offset})
+		} else if offsetToken > int(maxOff) || -offsetToken > int(maxOff) {
+			paginationErr = errors.Join(paginationErr, InvalidPaginationError{"offset: invalid value", offset})
+		} else {
+			token.Offset = offsetToken
+		}
 	}
 
 	if paginationErr != nil {

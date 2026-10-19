@@ -1,4 +1,4 @@
-package mysql
+package sql
 
 // JoinType represents the type of SQL JOIN
 type JoinType uint8

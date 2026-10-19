@@ -24,7 +24,7 @@ const (
 
 // Parse parses a URL-encoded query string into a db-agnostic token tree.
 // The query string should contain URL query parameters such as filter, sort,
-// pagination, per_page, page, and cursor.
+// limit, and offset
 func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 	toks := tokens.Tokens{}
 	var parseErr error
@@ -37,10 +37,8 @@ func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 
 	filterStr := params.Get("filters")
 	sortStr := params.Get("sort")
-	paginationStr := params.Get("pagination")
-	perPageStr := params.Get("per_page")
-	pageStr := params.Get("page")
-	cursorStr := params.Get("cursor")
+	limitStr := params.Get("limit")
+	offsetStr := params.Get("offset")
 
 	var filterTokens []tokens.FilterToken
 	var clauses []tokens.Clause
@@ -87,13 +85,11 @@ func Parse(queryStr string, fields filter.Fields) (tokens.Tokens, error) {
 	}
 
 	// parse pagination tokens
-	if paginationStr != "" {
-		paginationToken, err := parsePaginationTokens(paginationStr, perPageStr, pageStr, cursorStr)
-		if err != nil {
-			parseErr = errors.Join(parseErr, err)
-		} else {
-			toks.Pagination = paginationToken
-		}
+	paginationToken, err := parsePaginationTokens(limitStr, offsetStr)
+	if err != nil {
+		parseErr = errors.Join(parseErr, err)
+	} else {
+		toks.Pagination = paginationToken
 	}
 
 	if parseErr != nil {
