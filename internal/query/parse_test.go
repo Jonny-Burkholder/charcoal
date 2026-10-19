@@ -931,64 +931,52 @@ func TestParseSortTokens(t *testing.T) {
 
 type parsePaginationTokensTestCase struct {
 	name        string
-	pagination  string
-	perPage     string
-	page        string
-	cursor      string
+	limit       string
+	offset      string
 	expected    tokens.PaginationToken
 	expectedErr []error
 }
 
 var parsePaginationTokensTestCases = []parsePaginationTokensTestCase{
 	{
-		name:       "no pagination",
-		pagination: "",
-		expected:   tokens.PaginationToken{},
+		name:     "no limit or offset",
+		expected: tokens.PaginationToken{},
 	},
 	{
-		name:       "valid pagination with page and per_page",
-		pagination: "true",
-		page:       "2",
-		perPage:    "20",
+		name:   "valid limit and offset",
+		limit:  "20",
+		offset: "246",
 		expected: tokens.PaginationToken{
-			Paginate: true,
-			Page:     2,
-			PerPage:  20,
+			Limit:  20,
+			Offset: 246,
 		},
 	},
 	{
-		name:       "valid pagination with cursor",
-		pagination: "true",
-		cursor:     "abc123",
-		perPage:    "20",
+		name:  "valid limit only",
+		limit: "20",
 		expected: tokens.PaginationToken{
-			Paginate: true,
-			Cursor:   "abc123",
-			PerPage:  20,
-			// Page is not required when using cursor-based pagination, so it can be left at its zero value
-			Page: 0,
+			Limit: 20,
 		},
 	},
 	{
-		name:        "invalid pagination value",
-		pagination:  "yes",
-		expectedErr: []error{InvalidPaginationError{"pagination", "yes"}},
+		name:   "valid offset only",
+		offset: "246",
+		expected: tokens.PaginationToken{
+			Offset: 246,
+		},
 	},
 	{
-		name:        "page value is word - invalid", // should we fix this?
-		pagination:  "true",
-		page:        "two",
-		expectedErr: []error{InvalidPaginationError{"page", "two"}},
+		name:        "invalid limit",
+		limit:       "many",
+		expectedErr: []error{InvalidPaginationError{"limit", "many"}},
 	},
 	{
-		name:       "invalid values given",
-		pagination: "cool",
-		page:       "second",
-		perPage:    "gajillion",
+		name:   "invalid values given",
+		limit:  "-1",
+		offset: "5001",
 		expectedErr: []error{
-			InvalidPaginationError{"pagination", "cool"},
-			InvalidPaginationError{"page", "second"},
-			InvalidPaginationError{"per_page", "gajillion"},
+			InvalidPaginationError{"limit", "-1"},
+			InvalidPaginationError{"offset: invalid value", "5001"},
 		},
 	},
 }
@@ -996,7 +984,7 @@ var parsePaginationTokensTestCases = []parsePaginationTokensTestCase{
 func TestParsePaginationTokens(t *testing.T) {
 	for _, tc := range parsePaginationTokensTestCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := parsePaginationTokens(tc.pagination, tc.perPage, tc.page, tc.cursor)
+			result, err := parsePaginationTokens(tc.limit, tc.offset)
 			if len(tc.expectedErr) == 0 && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1030,7 +1018,7 @@ var parseTokenFields = filter.Fields{
 var parseTokensTestCases = []parseTokensTestCase{
 	// {
 	// 	name:   "full query with all components",
-	// 	query:  "filters=age>30, (name='John' OR name='Jane')&sort=age:asc, name:desc&pagination=true&page=2&per_page=20",
+	// 	query:  "filters=age>30, (name='John' OR name='Jane')&sort=age:asc, name:desc&limit=20&offset=40",
 	// 	fields: parseTokenFields,
 	// 	expected: tokens.Tokens{
 	// 		Filter: []tokens.FilterToken{
@@ -1070,9 +1058,8 @@ var parseTokensTestCases = []parseTokensTestCase{
 	// 			},
 	// 		},
 	// 		Pagination: tokens.PaginationToken{
-	// 			Paginate: true,
-	// 			Page:     2,
-	// 			PerPage:  20,
+	// 			Limit:  20,
+	// 			Offset: 40,
 	// 		},
 	// 	},
 	// },
@@ -1111,7 +1098,7 @@ var parseTokensTestCases = []parseTokensTestCase{
 	// },
 	{
 		name:   "everything is invalid",
-		query:  "filters=age>>30, narm = 'John' OR name is 'Jane'&sort=age up&pagination=yes&page=second&per_page=many",
+		query:  "filters=age>>30, narm = 'John' OR name is 'Jane'&sort=age up&limit=many&offset=second",
 		fields: parseTokenFields,
 		expectedErr: []error{
 			TypeMismatchError{
@@ -1122,9 +1109,8 @@ var parseTokensTestCases = []parseTokensTestCase{
 			FieldNotFoundError("narm"),
 			InvalidOperatorError("is"),
 			InvalidSortExpressionError("age up"),
-			InvalidPaginationError{"pagination", "yes"},
-			InvalidPaginationError{"per_page", "many"},
-			InvalidPaginationError{"page", "second"},
+			InvalidPaginationError{"limit", "many"},
+			InvalidPaginationError{"offset", "second"},
 		},
 	},
 }
@@ -1191,7 +1177,7 @@ func sortTokensAreEqual(a, b tokens.SortToken) bool {
 }
 
 func paginationTokensAreEqual(a, b tokens.PaginationToken) bool {
-	return a.Paginate == b.Paginate && a.Page == b.Page && a.PerPage == b.PerPage && a.Cursor == b.Cursor
+	return a.Paginate == b.Paginate && a.Limit == b.Limit && a.Offset == b.Offset
 }
 
 func tokensAreEqual(a, b tokens.Tokens) bool {

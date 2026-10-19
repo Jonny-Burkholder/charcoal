@@ -1,4 +1,4 @@
-package mysql
+package sql
 
 import (
 	"errors"
@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	ErrBuild           = errors.New("unable to build MySQL query")
+	ErrBuild           = errors.New("unable to build SQL query")
 	ErrEmptyTable      = errors.New("config.Table must not be empty")
 	ErrUnknownOperator = errors.New("unknown filter operator")
 )

@@ -1,4 +1,4 @@
-package mysql
+package sql
 
 import (
 	"charcoal/internal/filter"
@@ -265,34 +265,34 @@ var buildTestCases = []buildTestCase{
 		expectedOrder: "ORDER BY users.created_at DESC",
 	},
 	{
-		name: "pagination with page and per_page",
+		name: "pagination with limit and offset",
 		config: Config{
 			Table: "users",
 		},
 		tokens: tokens.Tokens{
 			Pagination: tokens.PaginationToken{
 				Paginate: true,
-				Page:     3,
-				PerPage:  25,
+				Limit:    25,
+				Offset:   50,
 			},
 		},
 		expectedPag:  "LIMIT ? OFFSET ?",
-		expectedArgs: []any{25, 50},
+		expectedArgs: []any{uint(25), 50},
 	},
 	{
-		name: "pagination page 1 has offset 0",
+		name: "pagination with zero offset",
 		config: Config{
 			Table: "users",
 		},
 		tokens: tokens.Tokens{
 			Pagination: tokens.PaginationToken{
 				Paginate: true,
-				Page:     1,
-				PerPage:  10,
+				Limit:    10,
+				Offset:   0,
 			},
 		},
 		expectedPag:  "LIMIT ? OFFSET ?",
-		expectedArgs: []any{10, 0},
+		expectedArgs: []any{uint(10), 0},
 	},
 	{
 		name: "join auto-included when table referenced in filter",
@@ -501,15 +501,15 @@ var buildTestCases = []buildTestCase{
 			},
 			Pagination: tokens.PaginationToken{
 				Paginate: true,
-				Page:     2,
-				PerPage:  20,
+				Limit:    20,
+				Offset:   20,
 			},
 		},
 		expectedWhere: "WHERE (users.name LIKE ? AND orders.total >= ?)",
 		expectedJoins: "LEFT JOIN orders ON users.id = orders.user_id",
 		expectedOrder: "ORDER BY users.name ASC",
 		expectedPag:   "LIMIT ? OFFSET ?",
-		expectedArgs:  []any{"%alice%", "50", 20, 20},
+		expectedArgs:  []any{"%alice%", "50", uint(20), 20},
 	},
 	{
 		name: "empty table name returns error",

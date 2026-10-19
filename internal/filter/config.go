@@ -13,7 +13,7 @@ func defaultConfig() Config {
 }
 
 func (cfg Config) validate() error {
-	// TODO: validate config
+	// TODO: validate config/figure out if it's worth validating
 
 	return nil
 }

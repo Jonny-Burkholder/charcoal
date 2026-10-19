@@ -33,6 +33,11 @@ var isByteSliceTests = []isByteSliceTest{
 		obj:      []byte{1, 2, 3},
 		expected: true,
 	},
+	{
+		name:     "pointer to a byte slice",
+		obj:      new([]byte),
+		expected: false,
+	},
 }
 
 func TestIsByteSlice(t *testing.T) {
